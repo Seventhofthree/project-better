@@ -1,5 +1,6 @@
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { StatusRow } from "../../components/StatusRow";
 import { theme } from "../../lib/theme";
 
 export default function HomeDashboard() {
@@ -10,7 +11,10 @@ export default function HomeDashboard() {
     >
       <div className="mx-auto max-w-md">
         <header className="pt-6">
-          <p className="text-lg" style={{ color: theme.colors.textSecondary }}>
+          <p
+            className="text-lg"
+            style={{ color: theme.colors.textSecondary }}
+          >
             Good Evening,
           </p>
 
@@ -21,7 +25,10 @@ export default function HomeDashboard() {
             Joshua
           </h1>
 
-          <p className="mt-3 text-sm" style={{ color: theme.colors.textSecondary }}>
+          <p
+            className="mt-3 text-sm"
+            style={{ color: theme.colors.textSecondary }}
+          >
             Wednesday
             <br />
             July 2, 2026
@@ -44,7 +51,10 @@ export default function HomeDashboard() {
               Morning Routine
             </h2>
 
-            <p className="mt-2 text-base" style={{ color: theme.colors.textSecondary }}>
+            <p
+              className="mt-2 text-base"
+              style={{ color: theme.colors.textSecondary }}
+            >
               Estimated time: 4 minutes
             </p>
 
@@ -63,10 +73,10 @@ export default function HomeDashboard() {
               Today
             </p>
 
-            <div className="mt-5 space-y-4 text-lg">
-              <div>○ Workout</div>
-              <div>○ Meal Plan</div>
-              <div>○ Night Routine</div>
+            <div className="mt-5 space-y-4">
+              <StatusRow label="Workout" />
+              <StatusRow label="Meal Plan" />
+              <StatusRow label="Night Routine" />
             </div>
           </Card>
         </div>
