@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card } from "../../components/Card";
 import { Button } from "../../components/Button";
 import { theme } from "../../lib/theme";
@@ -50,14 +51,18 @@ const morningSteps = [
 
 export default function MorningRoutine() {
   const [currentStep, setCurrentStep] = useState(0);
+  const router = useRouter();
 
   const step = morningSteps[currentStep];
   const isLastStep = currentStep === morningSteps.length - 1;
 
   function handleNextStep() {
-    if (!isLastStep) {
-      setCurrentStep(currentStep + 1);
+    if (isLastStep) {
+      router.push("/morning/complete");
+      return;
     }
+
+    setCurrentStep(currentStep + 1);
   }
 
   return (
@@ -78,18 +83,27 @@ export default function MorningRoutine() {
             {step.title}
           </h1>
 
-          <p className="mt-3 text-sm" style={{ color: theme.colors.textSecondary }}>
+          <p
+            className="mt-3 text-sm"
+            style={{ color: theme.colors.textSecondary }}
+          >
             Step {currentStep + 1} of {morningSteps.length}
           </p>
         </header>
 
         <div className="mt-8">
           <Card>
-            <p className="text-base" style={{ color: theme.colors.textSecondary }}>
+            <p
+              className="text-base"
+              style={{ color: theme.colors.textSecondary }}
+            >
               {step.detail}
             </p>
 
-            <p className="mt-4 text-base" style={{ color: theme.colors.textSecondary }}>
+            <p
+              className="mt-4 text-base"
+              style={{ color: theme.colors.textSecondary }}
+            >
               Estimated time: {step.time}
             </p>
 
