@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { StatusRow } from "../../components/StatusRow";
@@ -59,7 +60,9 @@ export default function HomeDashboard() {
             </p>
 
             <div className="mt-6">
-              <Button>Begin Morning Routine</Button>
+              <Link href="/morning">
+  <Button>Begin Morning Routine</Button>
+</Link>
             </div>
           </Card>
         </div>
