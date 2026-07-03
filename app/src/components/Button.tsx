@@ -3,11 +3,13 @@ import { theme } from "../lib/theme";
 
 type ButtonProps = {
   children: ReactNode;
+  onClick?: () => void;
 };
 
-export function Button({ children }: ButtonProps) {
+export function Button({ children, onClick }: ButtonProps) {
   return (
     <button
+      onClick={onClick}
       className="w-full px-6 py-4 text-lg font-semibold text-white transition active:scale-[0.99]"
       style={{
         backgroundColor: theme.colors.primary,
