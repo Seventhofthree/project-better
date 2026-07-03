@@ -1,50 +1,75 @@
+import { Button } from "../../components/Button";
+import { Card } from "../../components/Card";
+import { theme } from "../../lib/theme";
+
 export default function HomeDashboard() {
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
+    <main
+      className="min-h-screen p-6"
+      style={{ backgroundColor: theme.colors.background }}
+    >
       <div className="mx-auto max-w-md">
-
-        <h1 className="text-3xl font-bold text-slate-900">
-          Good Evening, Joshua
-        </h1>
-
-        <p className="mt-1 text-slate-500">
-          Wednesday • July 2
-        </p>
-
-        <section className="mt-8 rounded-3xl bg-white p-6 shadow">
-
-          <p className="text-sm uppercase tracking-widest text-slate-400">
-            Next
+        <header className="pt-6">
+          <p className="text-lg" style={{ color: theme.colors.textSecondary }}>
+            Good Evening,
           </p>
 
-          <h2 className="mt-2 text-2xl font-semibold">
-            🪥 Morning Routine
-          </h2>
+          <h1
+            className="mt-1 text-4xl font-bold tracking-tight"
+            style={{ color: theme.colors.textPrimary }}
+          >
+            Joshua
+          </h1>
 
-          <p className="mt-2 text-slate-500">
-            About 4 minutes
+          <p className="mt-3 text-sm" style={{ color: theme.colors.textSecondary }}>
+            Wednesday
+            <br />
+            July 2, 2026
           </p>
+        </header>
 
-          <button className="mt-6 w-full rounded-2xl bg-emerald-700 py-4 text-lg font-semibold text-white">
-            Start
-          </button>
+        <div className="mt-8">
+          <Card>
+            <p
+              className="text-xs font-semibold uppercase tracking-[0.25em]"
+              style={{ color: theme.colors.textSecondary }}
+            >
+              Today&apos;s Path
+            </p>
 
-        </section>
+            <h2
+              className="mt-4 text-2xl font-bold"
+              style={{ color: theme.colors.textPrimary }}
+            >
+              Morning Routine
+            </h2>
 
-        <section className="mt-6 rounded-3xl bg-white p-6 shadow">
+            <p className="mt-2 text-base" style={{ color: theme.colors.textSecondary }}>
+              Estimated time: 4 minutes
+            </p>
 
-          <p className="text-sm uppercase tracking-widest text-slate-400">
-            Today
-          </p>
+            <div className="mt-6">
+              <Button>Begin Morning Routine</Button>
+            </div>
+          </Card>
+        </div>
 
-          <ul className="mt-4 space-y-3 text-lg">
-            <li>○ Workout</li>
-            <li>○ Meal Plan</li>
-            <li>○ Night Routine</li>
-          </ul>
+        <div className="mt-6">
+          <Card>
+            <p
+              className="text-xs font-semibold uppercase tracking-[0.25em]"
+              style={{ color: theme.colors.textSecondary }}
+            >
+              Today
+            </p>
 
-        </section>
-
+            <div className="mt-5 space-y-4 text-lg">
+              <div>○ Workout</div>
+              <div>○ Meal Plan</div>
+              <div>○ Night Routine</div>
+            </div>
+          </Card>
+        </div>
       </div>
     </main>
   );
