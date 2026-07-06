@@ -4,7 +4,7 @@
    MyFitnessPal-style projections, and a stronger weekly review.
 */
 
-const APP_VERSION = '0.8.2';
+const APP_VERSION = '0.8.3';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const LEGACY_KEYS = ['pathfinder.state.v7', 'pathfinder.state.v1', 'pathfinder.0.1.state'];
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'];
@@ -40,7 +40,13 @@ const defaultMealPlan = {
       calories: 440,
       protein: 30,
       fiber: 15,
-      items: ['3/4 cup cooked lentils', '1 1/2 cups 1% milk', '1 cup frozen fruit', '1 Tbsp ground flaxseed']
+      items: ['3/4 cup cooked lentils', '1 1/2 cups 1% milk', '1 cup frozen fruit', '1 Tbsp ground flaxseed'],
+      recipe: {
+        prep: '5 minutes',
+        cook: '0–5 minutes if lentils are already cooked',
+        steps: ['Add cooked lentils to a bowl or container.', 'Add milk, frozen fruit, and ground flaxseed.', 'Stir and let it sit a few minutes so the fruit softens, or prep it the night before.', 'Eat cold like a simple breakfast bowl, or warm the lentils separately first if you prefer.'],
+        note: 'This is meant to be fast and repeatable, not fancy.'
+      }
     },
     lunch: {
       label: 'Meal 2 · Lunch egg fried rice bowl',
@@ -49,7 +55,13 @@ const defaultMealPlan = {
       calories: 520,
       protein: 28,
       fiber: 8,
-      items: ['1 1/4 cups cooked jasmine rice', '1 large whole egg', '1/2 cup liquid egg whites', '1 cup riced cauliflower', '1/2 cup pepper/onion blend', '1/2 cup mixed vegetables', '1 tsp oil', 'Garlic powder, pepper, low-sodium soy sauce, or Sriracha']
+      items: ['1 1/4 cups cooked jasmine rice', '1 large whole egg', '1/2 cup liquid egg whites', '1 cup riced cauliflower', '1/2 cup pepper/onion blend', '1/2 cup mixed vegetables', '1 tsp oil', 'Garlic powder, pepper, low-sodium soy sauce, or Sriracha'],
+      recipe: {
+        prep: '5–8 minutes if rice is cooked',
+        cook: '8–12 minutes',
+        steps: ['Heat 1 tsp oil in a nonstick pan or wok over medium heat.', 'Cook pepper/onion blend, riced cauliflower, and mixed vegetables until hot and most extra water cooks off.', 'Push vegetables to the side and scramble the egg plus egg whites.', 'Add cooked rice and stir everything together until hot.', 'Season lightly with garlic powder, pepper, low-sodium soy sauce, and Sriracha to taste.'],
+        note: 'Cook the vegetables first so the bowl does not turn watery.'
+      }
     },
     dinner: {
       label: 'Meal 3 · Dinner egg fried rice bowl',
@@ -58,7 +70,13 @@ const defaultMealPlan = {
       calories: 520,
       protein: 28,
       fiber: 8,
-      items: ['1 1/4 cups cooked jasmine rice', '1 large whole egg', '1/2 cup liquid egg whites', '1 cup riced cauliflower', '1/2 cup pepper/onion blend', '1/2 cup mixed vegetables', '1 tsp oil', 'Garlic powder, pepper, low-sodium soy sauce, or Sriracha']
+      items: ['1 1/4 cups cooked jasmine rice', '1 large whole egg', '1/2 cup liquid egg whites', '1 cup riced cauliflower', '1/2 cup pepper/onion blend', '1/2 cup mixed vegetables', '1 tsp oil', 'Garlic powder, pepper, low-sodium soy sauce, or Sriracha'],
+      recipe: {
+        prep: '5–8 minutes if rice is cooked',
+        cook: '8–12 minutes',
+        steps: ['Heat 1 tsp oil in a nonstick pan or wok over medium heat.', 'Cook pepper/onion blend, riced cauliflower, and mixed vegetables until hot and most extra water cooks off.', 'Push vegetables to the side and scramble the egg plus egg whites.', 'Add cooked rice and stir everything together until hot.', 'Season lightly with garlic powder, pepper, low-sodium soy sauce, and Sriracha to taste.'],
+        note: 'Same method as lunch. Keep it boring and easy.'
+      }
     }
   },
   baseMacros: { protein: 86, fat: 31, carbs: 213, fiber: 31 }
@@ -338,6 +356,11 @@ function defaultState() {
       name: 'Joshua',
       startingWeight: 305,
       goalWeight: 250,
+      sex: 'male',
+      age: 41,
+      heightFeet: 5,
+      heightInches: 8,
+      activityLevel: 'sedentary',
       calorieGoal: 1500,
       maintenanceCalories: 2600,
       waterGoal: 8,
@@ -554,6 +577,49 @@ function totalsForDay(day) {
   };
 }
 
+
+function currentWeightForProjection(day = getDay()) {
+  return getLastWeight()?.value || Number(day.weight || 0) || Number(appState.data.settings.startingWeight || 0);
+}
+
+function tdeeEstimate(weightOverride = null) {
+  const settings = appState.data.settings || {};
+  const weightLb = Number(weightOverride || currentWeightForProjection() || settings.startingWeight || 0);
+  const age = Number(settings.age || 0);
+  const feet = Number(settings.heightFeet || 0);
+  const inches = Number(settings.heightInches || 0);
+  const totalInches = feet * 12 + inches;
+  const factors = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725 };
+  const factor = factors[settings.activityLevel] || factors.sedentary;
+  if (!weightLb || !age || !totalInches) {
+    return { bmr: 0, tdee: Number(settings.maintenanceCalories || 0), factor, source: 'manual fallback' };
+  }
+  const kg = weightLb * 0.45359237;
+  const cm = totalInches * 2.54;
+  const bmr = (10 * kg) + (6.25 * cm) - (5 * age) + (settings.sex === 'female' ? -161 : 5);
+  return { bmr, tdee: bmr * factor, factor, source: 'body stats' };
+}
+
+function exerciseCalories(day, weightOverride = null) {
+  const minutes = Number(day.exercise?.minutes || 0);
+  if (!minutes || day.exercise?.status === 'missed') return 0;
+  const weightLb = Number(weightOverride || currentWeightForProjection(day) || appState.data.settings.startingWeight || 0);
+  if (!weightLb) return 0;
+  const kg = weightLb * 0.45359237;
+  const statusMet = { recovery: 2.0, minimum: 2.8, full: 3.8 }[day.exercise?.status] || 3.0;
+  const intensityAdjust = { easy: -0.4, comfortable: 0, challenging: 0.7 }[day.exercise?.intensity] || 0;
+  const met = Math.max(1.8, statusMet + intensityAdjust);
+  return Math.round(met * kg * (minutes / 60));
+}
+
+function dailyBurnEstimate(day, stats = null) {
+  const currentWeight = currentWeightForProjection(day);
+  const tdee = tdeeEstimate(currentWeight);
+  const exerciseAdd = stats && Number.isFinite(stats.avgExerciseCalories) ? stats.avgExerciseCalories : exerciseCalories(day, currentWeight);
+  const baseBurn = Number(tdee.tdee || appState.data.settings.maintenanceCalories || 0);
+  return { baseBurn, exerciseAdd, totalBurn: baseBurn + exerciseAdd, currentWeight, tdee };
+}
+
 function checkinHasData(day) {
   const c = day.checkin;
   return Boolean(c.energy || c.mood || c.sleep || c.stress || c.hunger || Number(c.water || 0) > 0 || c.notes);
@@ -622,7 +688,7 @@ function renderToday() {
       </div>
       <div class="card">
         <div class="score-circle" style="--score:${score}"><div><span>${score}</span><small>daily score</small></div></div>
-        <p class="note"><strong>0.8 goal:</strong> log food honestly, learn the movements, and use the projection as a direction check instead of a promise.</p>
+        <p class="note"><strong>Goal:</strong> log food honestly, learn the movements, and use the projection as a direction check instead of a promise.</p>
       </div>
     </section>
 
@@ -733,7 +799,7 @@ function renderMeals() {
           <div class="card-title">
             <div>
               <h3>${escapeHtml(plan.planName)}</h3>
-              <p>0.8 food system: plan vs actual intake, saved swaps, simple calories/protein logging, and an at-this-pace projection.</p>
+              <p>Plan vs actual intake, saved swaps, simple calories/protein logging, and an at-this-pace projection.</p>
             </div>
             <span class="badge">${Math.round(totals.loggedCalories).toLocaleString()} kcal logged</span>
           </div>
@@ -787,6 +853,7 @@ function mealEditorCard(key, meal, day) {
       <span class="badge ${status === 'skipped' ? 'warn' : status ? '' : 'neutral'}">${mealStatusLabels[status]}</span>
     </div>
     <ul class="food-list">${(meal.items || []).map(item => `<li><span>•</span><span>${escapeHtml(item)}</span></li>`).join('')}</ul>
+    ${mealRecipeCardHtml(meal)}
     <div class="segmented" role="group" aria-label="${key} status">
       ${['planned', 'swapped', 'skipped'].map(value => `<button data-action="meal-status" data-meal="${key}" data-status="${value}" class="${status === value ? 'active' : ''}">${mealStatusLabels[value]}</button>`).join('')}
       <button data-action="meal-status" data-meal="${key}" data-status="" class="${status === '' ? 'active' : ''}">Clear</button>
@@ -876,6 +943,8 @@ function planMealEditCard(key, meal) {
       <div class="input-group"><label>Fiber</label><input data-plan-meal="${key}" data-meal-field="fiber" type="number" value="${escapeHtml(meal.fiber || 0)}" /></div>
     </div>
     <div class="input-group"><label>Items, one per line</label><textarea data-plan-meal="${key}" data-meal-field="items">${escapeHtml((meal.items || []).join('\n'))}</textarea></div>
+    <div class="input-group"><label>Recipe steps, one per line</label><textarea data-plan-meal="${key}" data-meal-field="recipeSteps">${escapeHtml(((meal.recipe && meal.recipe.steps) || []).join('\n'))}</textarea></div>
+    <div class="input-group"><label>Recipe note</label><input data-plan-meal="${key}" data-meal-field="recipeNote" value="${escapeHtml(meal.recipe?.note || '')}" /></div>
   </div>`;
 }
 
@@ -891,7 +960,7 @@ function renderExercise() {
           <div class="card-title">
             <div>
               <h3>Exercise system</h3>
-              <p>0.8 adds beginner instructions, form cues, pain warnings, and a movement guide you can use before each exercise.</p>
+              <p>Beginner instructions, form cues, pain warnings, and a movement guide you can use before each exercise.</p>
             </div>
             <span class="badge ${suggestion.badge}">${escapeHtml(suggestion.label)}</span>
           </div>
@@ -977,7 +1046,7 @@ function renderGuide() {
     <section class="grid wide-sidebar">
       <aside class="grid">
         <div class="card highlight">
-          <div class="card-title"><div><h3>Beginner exercise guide</h3><p>Built for learning what the movements mean before you do them.</p></div><span class="badge blue">0.8</span></div>
+          <div class="card-title"><div><h3>Beginner exercise guide</h3><p>Built for learning what the movements mean before you do them.</p></div><span class="badge blue">Beginner</span></div>
           <p>Use this like a simple instruction manual. The goal is safe, repeatable movement — not looking like a fitness influencer.</p>
         </div>
         <div class="card">
@@ -1082,7 +1151,7 @@ function renderRoutines() {
           <div class="card-title">
             <div>
               <h3>Routine builder</h3>
-              <p>0.8.2 restores morning/night grooming, oral care, skin care, hand/foot/lip care, and the between-lunch-and-dinner movement block.</p>
+              <p>Morning/night grooming, oral care, skin care, hand/foot/lip care, and the between-lunch-and-dinner movement block.</p>
             </div>
             <span class="badge">${routineCompletion(day)}% today</span>
           </div>
@@ -1131,7 +1200,7 @@ function renderAssistant() {
           <div class="card-title">
             <div>
               <h3>Pathfinder brief</h3>
-              <p>0.5 adds a morning brief, evening recap, what changed, upcoming focus, and body/weight expectation summary.</p>
+              <p>Morning brief, evening recap, what changed, upcoming focus, and body/weight expectation summary.</p>
             </div>
             <span class="badge blue">Assistant layer</span>
           </div>
@@ -1236,17 +1305,28 @@ function renderSettings() {
   $('#app').innerHTML = `
     <section class="grid sidebar">
       <div class="card highlight">
-        <div class="card-title"><div><h3>Settings</h3><p>Local-first app data. Nothing leaves this browser unless you export it.</p></div><span class="badge">v${APP_VERSION}</span></div>
+        <div class="card-title"><div><h3>Settings</h3><p>Local-first app data. Nothing leaves this browser unless you export it.</p></div></div>
         <div class="input-row three">
           ${settingInput('name', 'Name', settings.name, 'text')}
           ${settingInput('startingWeight', 'Starting weight', settings.startingWeight, 'number')}
           ${settingInput('goalWeight', 'Goal weight', settings.goalWeight, 'number')}
           ${settingInput('calorieGoal', 'Calorie goal', settings.calorieGoal, 'number')}
-          ${settingInput('maintenanceCalories', 'Maintenance estimate', settings.maintenanceCalories, 'number')}
           ${settingInput('waterGoal', 'Water goal cups', settings.waterGoal, 'number')}
           ${settingInput('exerciseWindow', 'Exercise window', settings.exerciseWindow, 'text')}
           ${settingInput('bedtimeBufferHours', 'Bedtime buffer hours', settings.bedtimeBufferHours, 'number')}
           <div class="input-group"><label>Default routine mode</label><select data-setting-field="routineMode">${Object.keys(appState.data.routines).map(key => `<option value="${key}" ${settings.routineMode === key ? 'selected' : ''}>${escapeHtml(appState.data.routines[key].label || key)}</option>`).join('')}</select></div>
+        </div>
+        <div class="card flat tdee-settings">
+          <div class="card-title"><div><h3>TDEE inputs</h3><p>Used for bodyweight expectations and at-this-pace projections.</p></div><span class="badge neutral">${Math.round(tdeeEstimate().tdee || settings.maintenanceCalories || 0)} kcal/day</span></div>
+          <div class="input-row three">
+            <div class="input-group"><label>Sex</label><select data-setting-field="sex"><option value="male" ${settings.sex === 'male' ? 'selected' : ''}>Male</option><option value="female" ${settings.sex === 'female' ? 'selected' : ''}>Female</option></select></div>
+            ${settingInput('age', 'Age', settings.age, 'number')}
+            ${settingInput('heightFeet', 'Height feet', settings.heightFeet, 'number')}
+            ${settingInput('heightInches', 'Height inches', settings.heightInches, 'number')}
+            <div class="input-group"><label>Baseline activity</label><select data-setting-field="activityLevel"><option value="sedentary" ${settings.activityLevel === 'sedentary' ? 'selected' : ''}>Mostly sitting / baseline</option><option value="light" ${settings.activityLevel === 'light' ? 'selected' : ''}>Lightly active</option><option value="moderate" ${settings.activityLevel === 'moderate' ? 'selected' : ''}>Moderately active</option><option value="active" ${settings.activityLevel === 'active' ? 'selected' : ''}>Very active</option></select></div>
+            ${settingInput('maintenanceCalories', 'Manual fallback maintenance', settings.maintenanceCalories, 'number')}
+          </div>
+          <p class="note">Pathfinder uses a TDEE estimate from your body stats, then adds logged exercise calories for the projection. It is still an estimate, but it reacts better to current weight and actual workouts.</p>
         </div>
       </div>
       <aside class="grid">
@@ -1260,7 +1340,7 @@ function renderSettings() {
         </div>
         <div class="card danger-zone">
           <h3>Reset</h3>
-          <p>Restores a clean 0.8 state on this browser only.</p>
+          <p>Restores a clean Pathfinder state on this browser only.</p>
           <button class="danger" data-action="reset-app">Reset app data</button>
         </div>
       </aside>
@@ -1286,6 +1366,19 @@ function stepCard(title, subtitle, done, detail, warn = false) {
 
 function miniMeal(key, meal, status) {
   return `<div class="metric"><span class="value">${status ? '✓' : '○'}</span><span class="label">${escapeHtml(meal.shortLabel || key)}</span><small>${escapeHtml(mealStatusLabels[status] || 'Open')}</small></div>`;
+}
+
+
+function mealRecipeCardHtml(meal) {
+  const recipe = meal.recipe || {};
+  const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
+  if (!steps.length && !recipe.note) return '';
+  return `<details class="recipe-card">
+    <summary>Recipe card</summary>
+    <div class="recipe-meta"><span>${escapeHtml(recipe.prep ? `Prep ${recipe.prep}` : 'Prep as needed')}</span><span>${escapeHtml(recipe.cook ? `Cook ${recipe.cook}` : 'Cook as needed')}</span></div>
+    ${steps.length ? `<ol class="step-list recipe-steps">${steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>` : ''}
+    ${recipe.note ? `<p class="note">${escapeHtml(recipe.note)}</p>` : ''}
+  </details>`;
 }
 
 function customItemsHtml(day) {
@@ -1434,10 +1527,14 @@ function weeklyStats(endKey) {
   const avgLoggedCalories = loggedCalDays.length ? Math.round(loggedCalDays.reduce((sum, value) => sum + value, 0) / loggedCalDays.length) : 0;
   const loggedProteinDays = days.map(({ day }) => totalsForDay(day).loggedProtein).filter(value => value > 0);
   const avgLoggedProtein = loggedProteinDays.length ? Math.round(loggedProteinDays.reduce((sum, value) => sum + value, 0) / loggedProteinDays.length) : 0;
+  const currentWeight = currentWeightForProjection(days.at(-1)?.day || getDay(endKey));
+  const exerciseCalDays = days.map(({ day }) => exerciseCalories(day, currentWeight));
+  const avgExerciseCalories = Math.round(exerciseCalDays.reduce((sum, value) => sum + value, 0) / exerciseCalDays.length);
+  const totalExerciseCalories = exerciseCalDays.reduce((sum, value) => sum + value, 0);
   const weights = days.map(({ key, day }) => day.weight ? { key, value: Number(day.weight) } : null).filter(Boolean);
   const weightChange = weights.length >= 2 ? Number((weights.at(-1).value - weights[0].value).toFixed(1)) : null;
   const mealBreakdown = Object.fromEntries(MEAL_KEYS.map(key => [key, { logged: days.filter(({ day }) => mealLogged(day, key)).length, planned: days.filter(({ day }) => mealPlanned(day, key)).length, swapped: days.filter(({ day }) => mealSwapped(day, key)).length, skipped: days.filter(({ day }) => mealSkipped(day, key)).length }]));
-  return { start, end: endKey, keys, days, workouts: workoutsDone, minimumWins, fullWorkouts, recoveryDays, missedWorkouts, mealLogDays, planDays, windDowns, routineDays, waterDays, score, avgLoggedCalories, avgLoggedProtein, weights, weightChange, mealBreakdown };
+  return { start, end: endKey, keys, days, workouts: workoutsDone, minimumWins, fullWorkouts, recoveryDays, missedWorkouts, mealLogDays, planDays, windDowns, routineDays, waterDays, score, avgLoggedCalories, avgLoggedProtein, avgExerciseCalories, totalExerciseCalories, weights, weightChange, mealBreakdown };
 }
 
 function buildWeeklyReview(stats) {
@@ -1508,30 +1605,31 @@ function weeklyFriction(stats, weakest) {
 }
 
 function atPaceProjection(day, stats) {
-  const maintenance = Number(appState.data.settings.maintenanceCalories || 0);
-  const currentWeight = getLastWeight()?.value || Number(day.weight || 0) || Number(appState.data.settings.startingWeight || 0);
+  const currentWeight = currentWeightForProjection(day);
+  const burn = dailyBurnEstimate(day, stats);
   const todayTotals = totalsForDay(day);
   const todayCalories = Number(todayTotals.loggedCalories || 0);
   const avgCalories = Number(stats.avgLoggedCalories || 0);
   const usedCalories = avgCalories || todayCalories;
   const loggedDays = stats.days.filter(({ day: d }) => totalsForDay(d).loggedCalories > 0).length;
   const completeDays = stats.mealLogDays;
-  if (!maintenance || !usedCalories || !currentWeight) {
-    return { summary: 'Add calories, weight, and maintenance estimate to enable the 5-week projection.', fiveWeekLow: null, fiveWeekHigh: null, weeklyLoss: 0, confidence: 'low', confidenceReason: 'missing maintenance, weight, or food logs' };
+  if (!burn.totalBurn || !usedCalories || !currentWeight) {
+    return { summary: 'Add calories, weight, and body stats to enable the 5-week projection.', fiveWeekLow: null, fiveWeekHigh: null, weeklyLoss: 0, confidence: 'low', confidenceReason: 'missing TDEE inputs, weight, or food logs', usedCalories: 0, dailyGap: 0, burn };
   }
-  const dailyGap = maintenance - usedCalories;
-  const weeklyLoss = Math.max(0, dailyGap * 7 / 3500);
+  const dailyGap = burn.totalBurn - usedCalories;
+  const weeklyLoss = dailyGap * 7 / 3500;
   const fiveWeekLoss = weeklyLoss * 5;
   const confidence = completeDays >= 5 ? 'higher' : loggedDays >= 4 ? 'medium' : 'low';
   const uncertainty = confidence === 'higher' ? 1.5 : confidence === 'medium' ? 3 : 5;
   const projected = currentWeight - fiveWeekLoss;
   const fiveWeekLow = projected - uncertainty;
   const fiveWeekHigh = projected + uncertainty;
+  const exerciseText = burn.exerciseAdd ? ` plus about ${Math.round(burn.exerciseAdd)} kcal/day from logged exercise` : ' with no meaningful logged exercise bonus yet';
   const summary = dailyGap <= 0
-    ? `If most days look like the logged average, weight loss would likely be slow or paused over 5 weeks.`
-    : `If most days look like the logged average, a rough 5-week range is ${fiveWeekLow.toFixed(1)}–${fiveWeekHigh.toFixed(1)} lb.`;
+    ? `Based on your TDEE estimate${exerciseText}, logged calories are near or above your estimated burn. Weight loss would likely be slow or paused over 5 weeks.`
+    : `Based on your TDEE estimate${exerciseText}, a rough 5-week range is ${fiveWeekLow.toFixed(1)}–${fiveWeekHigh.toFixed(1)} lb.`;
   const confidenceReason = confidence === 'higher' ? 'most meal days are complete' : confidence === 'medium' ? 'some useful food data exists, but blanks still matter' : 'too few complete food logs for a confident projection';
-  return { summary, fiveWeekLow, fiveWeekHigh, weeklyLoss, confidence, confidenceReason, usedCalories, dailyGap, loggedDays, completeDays };
+  return { summary, fiveWeekLow, fiveWeekHigh, weeklyLoss: Math.max(0, weeklyLoss), confidence, confidenceReason, usedCalories, dailyGap, loggedDays, completeDays, burn };
 }
 
 function projectionCardHtml(day, stats) {
@@ -1540,10 +1638,11 @@ function projectionCardHtml(day, stats) {
   const goal = Number(appState.data.settings.calorieGoal || 0);
   const delta = totals.loggedCalories && goal ? totals.loggedCalories - goal : 0;
   return `<div class="card prediction-card">
-    <div class="card-title"><div><h3>At this pace</h3><p>MyFitnessPal-style direction check using logged food and your maintenance estimate.</p></div><span class="badge ${projection.confidence === 'low' ? 'warn' : projection.confidence === 'medium' ? 'blue' : ''}">${projection.confidence} confidence</span></div>
+    <div class="card-title"><div><h3>At this pace</h3><p>Direction check using food logs, current weight, TDEE, and logged exercise.</p></div><span class="badge ${projection.confidence === 'low' ? 'warn' : projection.confidence === 'medium' ? 'blue' : ''}">${projection.confidence} confidence</span></div>
     <p>${escapeHtml(projection.summary)}</p>
-    <div class="grid two">
+    <div class="grid three">
       <div class="metric"><span class="value">${projection.weeklyLoss ? projection.weeklyLoss.toFixed(1) : '—'}</span><span class="label">lb/week rough math</span><small>not a promise</small></div>
+      <div class="metric"><span class="value">${projection.burn?.totalBurn ? Math.round(projection.burn.totalBurn) : '—'}</span><span class="label">estimated daily burn</span><small>${projection.burn?.exerciseAdd ? '+' + Math.round(projection.burn.exerciseAdd) + ' exercise' : 'TDEE baseline'}</small></div>
       <div class="metric"><span class="value">${delta ? (delta > 0 ? '+' : '') + Math.round(delta) : '—'}</span><span class="label">vs calorie goal today</span><small>${Math.round(totals.loggedCalories) || 0} logged</small></div>
     </div>
     <p class="note">${escapeHtml(projection.confidenceReason)}. Pathfinder uses ranges because water, sodium, sleep, and logging gaps can move the scale.</p>
@@ -1574,6 +1673,9 @@ function buildAiReviewPacket(stats) {
       waterDays: stats.waterDays,
       avgLoggedCalories: stats.avgLoggedCalories,
       avgLoggedProtein: stats.avgLoggedProtein,
+      avgExerciseCalories: stats.avgExerciseCalories,
+      totalExerciseCalories: stats.totalExerciseCalories,
+      tdeeEstimate: Math.round(tdeeEstimate(currentWeightForProjection(getDay(stats.end))).tdee || 0),
       weightChange: stats.weightChange,
       mealBreakdown: stats.mealBreakdown
     },
@@ -1662,12 +1764,16 @@ function progressNarrative(stats, lastWeight) {
 }
 
 function forecastText(stats) {
-  const maintenance = Number(appState.data.settings.maintenanceCalories || 0);
-  if (!maintenance || !stats.avgLoggedCalories) return 'Add food logs and a maintenance estimate in Settings to enable the rough projection helper.';
-  const dailyGap = maintenance - stats.avgLoggedCalories;
-  const weeklyLbs = dailyGap * 7 / 3500;
-  if (dailyGap <= 0) return 'Logged calories are near or above the maintenance estimate this week. That usually means progress will be slower unless activity or food changes.';
-  return `Rough math from logged days: about ${Math.max(0, weeklyLbs).toFixed(1)} lb/week potential. Treat this as a direction check, not a promise.`;
+  const day = getDay(stats.end);
+  const projection = atPaceProjection(day, stats);
+  const burn = projection.burn || dailyBurnEstimate(day, stats);
+  if (!projection.usedCalories) return 'Add food logs, weight, and TDEE inputs in Settings to enable the bodyweight expectation helper.';
+  const burnLine = `Estimated daily burn: about ${Math.round(burn.totalBurn || 0)} kcal (${Math.round(burn.baseBurn || 0)} TDEE baseline${burn.exerciseAdd ? ` + ${Math.round(burn.exerciseAdd)} logged exercise` : ''}).`;
+  const foodLine = `Average logged intake: about ${Math.round(projection.usedCalories)} kcal/day.`;
+  const direction = projection.dailyGap <= 0
+    ? 'That points to slow or paused loss unless food intake drops, activity increases, or logging gets tighter.'
+    : `That points to roughly ${projection.weeklyLoss.toFixed(1)} lb/week on paper.`;
+  return `${burnLine}\n${foodLine}\n${direction}\n${projection.confidence} confidence: ${projection.confidenceReason}.`;
 }
 
 function getLastWeight() {
@@ -1959,6 +2065,8 @@ function updatePlanMeal(meal, field, value) {
   if (!target) return;
   if (['calories','protein','fiber'].includes(field)) target[field] = Number(value || 0);
   else if (field === 'items') target.items = value.split('\n').map(item => item.trim()).filter(Boolean);
+  else if (field === 'recipeSteps') { target.recipe = target.recipe || {}; target.recipe.steps = value.split('\n').map(item => item.trim()).filter(Boolean); }
+  else if (field === 'recipeNote') { target.recipe = target.recipe || {}; target.recipe.note = value; }
   else target[field] = value;
   recalcPlanMacros(); saveState();
 }
@@ -1972,7 +2080,7 @@ function recalcPlanMacros() {
 }
 
 function numericSetting(key, value) {
-  if (['startingWeight', 'goalWeight', 'calorieGoal', 'maintenanceCalories', 'waterGoal', 'bedtimeBufferHours', 'experienceLevel'].includes(key)) return Number(value || 0);
+  if (['startingWeight', 'goalWeight', 'calorieGoal', 'maintenanceCalories', 'waterGoal', 'bedtimeBufferHours', 'experienceLevel', 'age', 'heightFeet', 'heightInches'].includes(key)) return Number(value || 0);
   return value;
 }
 

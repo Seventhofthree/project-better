@@ -236,3 +236,12 @@ input::placeholder, textarea::placeholder { color: rgba(216,234,220,.55); }
   .routine-list li button { grid-column: 2; justify-self: start; margin-top: 6px; }
   .routine-list li button + button { margin-left: 6px !important; }
 }
+
+/* 0.8.3 cleanup + recipe/TDEE polish */
+.recipe-card { margin-top: 12px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.04); padding: 12px 14px; }
+.recipe-card summary { cursor: pointer; color: var(--accent); font-weight: 850; }
+.recipe-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.recipe-meta span { border: 1px solid var(--line); background: rgba(255,255,255,.055); color: var(--muted); border-radius: 999px; padding: 6px 9px; font-size: .82rem; }
+.recipe-steps { padding-left: 20px; }
+.tdee-settings { margin-top: 16px; }
+.tdee-settings .card-title { align-items: center; }
