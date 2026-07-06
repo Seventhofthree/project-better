@@ -1,0 +1,12 @@
+{
+  "name": "Pathfinder",
+  "short_name": "Pathfinder",
+  "description": "A local-first daily companion for meals, movement, beginner exercise guidance, progress, and weekly review.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#101815",
+  "theme_color": "#182a24",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
