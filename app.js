@@ -1,10 +1,10 @@
-/* Pathfinder 0.8
+/* Pathfinder 0.8.5
    Local-first daily companion app. No account, no server, no dependencies.
-   0.8 adds a beginner exercise guide, clearer food logging,
-   MyFitnessPal-style projections, and a stronger weekly review.
+   0.8.5 adds context-aware Today focus, weather guidance,
+   better exercise guide support, and food database-assisted logging.
 */
 
-const APP_VERSION = '0.8.3';
+const APP_VERSION = '0.8.5';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const LEGACY_KEYS = ['pathfinder.state.v7', 'pathfinder.state.v1', 'pathfinder.0.1.state'];
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'];
@@ -97,6 +97,39 @@ const defaultFoods = [
   { id: 'olive-oil', name: 'Olive oil', serving: '1 tsp', calories: 40, protein: 0, fiber: 0, category: 'Fat' },
   { id: 'greek-yogurt', name: 'Plain Greek yogurt', serving: '3/4 cup', calories: 105, protein: 18, fiber: 0, category: 'Protein' },
   { id: 'canned-salmon', name: 'Canned salmon', serving: '4 oz', calories: 180, protein: 25, fiber: 0, category: 'Protein' }
+];
+
+const localFoodDatabase = [
+  ...defaultFoods.map(item => ({ ...item, source: 'Pathfinder starter' })),
+  { id: 'db-cooked-white-rice-half', name: 'Cooked white rice', serving: '1/2 cup cooked', calories: 103, protein: 2, fiber: 0.3, category: 'Carb base', source: 'Starter database' },
+  { id: 'db-brown-rice', name: 'Cooked brown rice', serving: '1 cup cooked', calories: 216, protein: 5, fiber: 4, category: 'Carb base', source: 'Starter database' },
+  { id: 'db-oatmeal', name: 'Oatmeal cooked with water', serving: '1 cup cooked', calories: 154, protein: 6, fiber: 4, category: 'Breakfast', source: 'Starter database' },
+  { id: 'db-banana', name: 'Banana', serving: '1 medium', calories: 105, protein: 1, fiber: 3, category: 'Fruit', source: 'Starter database' },
+  { id: 'db-orange', name: 'Orange', serving: '1 medium', calories: 62, protein: 1, fiber: 3, category: 'Fruit', source: 'Starter database' },
+  { id: 'db-apple', name: 'Apple', serving: '1 medium', calories: 95, protein: 0, fiber: 4, category: 'Fruit', source: 'Starter database' },
+  { id: 'db-whole-milk', name: 'Whole milk', serving: '1 cup', calories: 149, protein: 8, fiber: 0, category: 'Dairy', source: 'Starter database' },
+  { id: 'db-skim-milk', name: 'Skim milk', serving: '1 cup', calories: 83, protein: 8, fiber: 0, category: 'Dairy', source: 'Starter database' },
+  { id: 'db-nonfat-greek-yogurt', name: 'Nonfat Greek yogurt', serving: '3/4 cup', calories: 100, protein: 18, fiber: 0, category: 'Protein', source: 'Starter database' },
+  { id: 'db-cottage-cheese', name: 'Low-fat cottage cheese', serving: '1/2 cup', calories: 90, protein: 13, fiber: 0, category: 'Protein', source: 'Starter database' },
+  { id: 'db-chicken-breast', name: 'Chicken breast cooked', serving: '4 oz', calories: 187, protein: 35, fiber: 0, category: 'Protein', source: 'Starter database' },
+  { id: 'db-tuna-water', name: 'Canned tuna in water', serving: '1 can drained', calories: 120, protein: 26, fiber: 0, category: 'Protein', source: 'Starter database' },
+  { id: 'db-salmon-pouch', name: 'Salmon pouch/can', serving: '3 oz', calories: 120, protein: 17, fiber: 0, category: 'Protein', source: 'Starter database' },
+  { id: 'db-ground-turkey', name: 'Ground turkey cooked', serving: '4 oz', calories: 220, protein: 28, fiber: 0, category: 'Protein', source: 'Starter database' },
+  { id: 'db-tofu', name: 'Firm tofu', serving: '1/2 block', calories: 180, protein: 20, fiber: 2, category: 'Protein', source: 'Starter database' },
+  { id: 'db-broccoli', name: 'Broccoli cooked', serving: '1 cup', calories: 55, protein: 4, fiber: 5, category: 'Vegetable', source: 'Starter database' },
+  { id: 'db-green-beans', name: 'Green beans cooked', serving: '1 cup', calories: 44, protein: 2, fiber: 4, category: 'Vegetable', source: 'Starter database' },
+  { id: 'db-carrots', name: 'Carrots cooked', serving: '1 cup', calories: 55, protein: 1, fiber: 5, category: 'Vegetable', source: 'Starter database' },
+  { id: 'db-spinach', name: 'Spinach cooked', serving: '1 cup', calories: 41, protein: 5, fiber: 4, category: 'Vegetable', source: 'Starter database' },
+  { id: 'db-frozen-stir-fry', name: 'Frozen stir-fry vegetables', serving: '1 cup', calories: 60, protein: 2, fiber: 4, category: 'Vegetable', source: 'Starter database' },
+  { id: 'db-avocado', name: 'Avocado', serving: '1/2 medium', calories: 120, protein: 2, fiber: 5, category: 'Fat/fiber', source: 'Starter database' },
+  { id: 'db-peanut-butter', name: 'Peanut butter', serving: '1 Tbsp', calories: 95, protein: 4, fiber: 1, category: 'Fat/protein', source: 'Starter database' },
+  { id: 'db-sesame-oil', name: 'Toasted sesame oil', serving: '1 tsp', calories: 40, protein: 0, fiber: 0, category: 'Fat/flavor', source: 'Starter database' },
+  { id: 'db-soy-sauce-low', name: 'Low-sodium soy sauce', serving: '1 Tbsp', calories: 10, protein: 1, fiber: 0, category: 'Flavor', source: 'Starter database' },
+  { id: 'db-sriracha', name: 'Sriracha', serving: '1 tsp', calories: 5, protein: 0, fiber: 0, category: 'Flavor', source: 'Starter database' },
+  { id: 'db-protein-shake', name: 'Protein shake', serving: '1 scoop mixed with water', calories: 120, protein: 24, fiber: 0, category: 'Protein', source: 'Starter database' },
+  { id: 'db-sub-sandwich', name: 'Deli/turkey sandwich estimate', serving: '1 sandwich', calories: 450, protein: 28, fiber: 4, category: 'Real-world estimate', source: 'Starter database' },
+  { id: 'db-fast-food-burger', name: 'Fast food burger estimate', serving: '1 burger', calories: 550, protein: 25, fiber: 2, category: 'Real-world estimate', source: 'Starter database' },
+  { id: 'db-fried-rice-restaurant', name: 'Restaurant fried rice estimate', serving: '2 cups', calories: 700, protein: 20, fiber: 4, category: 'Real-world estimate', source: 'Starter database' }
 ];
 
 const defaultSavedMeals = [
@@ -370,12 +403,19 @@ function defaultState() {
       experienceLevel: 1,
       morningBrief: true,
       windDown: true,
-      assistantTone: 'friendly'
+      assistantTone: 'friendly',
+      weatherEnabled: true,
+      weatherLocation: 'Muskogee, OK',
+      weatherLatitude: 35.7479,
+      weatherLongitude: -95.3697,
+      foodSearch: ''
     },
     plan: structuredClone(defaultMealPlan),
     foods: structuredClone(defaultFoods),
     savedMeals: structuredClone(defaultSavedMeals),
     swaps: structuredClone(defaultSwaps),
+    foodSearchResults: [],
+    weather: { loading: false, fetchedAt: '', error: '', current: null, hourly: [] },
     workouts: structuredClone(workouts),
     routines: structuredClone(defaultRoutines),
     days: {}
@@ -408,6 +448,8 @@ function migrateState(state) {
   state.foods = Array.isArray(state.foods) && state.foods.length ? state.foods : structuredClone(defaultFoods);
   state.savedMeals = Array.isArray(state.savedMeals) && state.savedMeals.length ? state.savedMeals : structuredClone(defaultSavedMeals);
   state.swaps = Array.isArray(state.swaps) && state.swaps.length ? state.swaps : structuredClone(defaultSwaps);
+  state.foodSearchResults = Array.isArray(state.foodSearchResults) ? state.foodSearchResults : [];
+  state.weather = mergeDefaults({ loading: false, fetchedAt: '', error: '', current: null, hourly: [] }, state.weather || {});
   state.workouts = Array.isArray(state.workouts) && state.workouts.length ? state.workouts : structuredClone(workouts);
   state.routines = mergeRoutineDefaults(state.routines || {});
   Object.values(state.days || {}).forEach(migrateDay);
@@ -665,6 +707,160 @@ function guidanceButtonHtml(guidance) {
   return `<button class="primary" data-action="jump" data-tab-target="${escapeHtml(guidance.tab)}">${escapeHtml(guidance.button)}</button>`;
 }
 
+
+function currentTimeBlock() {
+  if (appState.selectedDate !== todayKey()) return 'review';
+  const hour = new Date().getHours();
+  if (hour < 11) return 'morning';
+  if (hour < 17) return 'betweenLunchDinner';
+  return 'evening';
+}
+
+function routineFocusInfo(day) {
+  const block = currentTimeBlock();
+  const mode = selectedRoutineMode();
+  if (block === 'review') return { block: 'morning', title: selectedRoutineLabel(), message: 'Viewing a saved date. Open the full routine board to review or edit.' };
+  const labels = { morning: 'Morning focus', betweenLunchDinner: 'Between lunch and dinner focus', evening: 'Evening reset' };
+  const items = mode[block] || [];
+  const done = items.filter(item => day.routine.completedIds[item.id]).length;
+  const missed = earlierRoutineMissCount(day, block);
+  let message = `${done}/${items.length} done in this block.`;
+  if (block === 'evening' && missed > 0) message = `${missed} earlier item(s) were missed. Do not chase the whole day now; close the night well.`;
+  if (block === 'betweenLunchDinner' && missed > 0) message = `${missed} morning item(s) were missed. Shift to lunch, movement, and water now.`;
+  return { block, title: labels[block] || selectedRoutineLabel(), message };
+}
+
+function earlierRoutineMissCount(day, currentBlock) {
+  const mode = selectedRoutineMode();
+  const order = ROUTINE_BLOCKS;
+  const currentIndex = order.indexOf(currentBlock);
+  if (currentIndex <= 0) return 0;
+  return order.slice(0, currentIndex).flatMap(block => mode[block] || []).filter(item => !day.routine.completedIds[item.id]).length;
+}
+
+function weatherStale() {
+  const w = appState.data.weather || {};
+  if (!w.fetchedAt) return true;
+  return Date.now() - new Date(w.fetchedAt).getTime() > 1000 * 60 * 35;
+}
+
+function ensureWeatherForToday() {
+  const settings = appState.data.settings;
+  const w = appState.data.weather || {};
+  if (!settings.weatherEnabled || appState.selectedDate !== todayKey() || w.loading || !weatherStale()) return;
+  refreshWeather(false);
+}
+
+async function refreshWeather(showMessage = true) {
+  const settings = appState.data.settings;
+  if (!settings.weatherEnabled) return showMessage && showToast('Weather is turned off');
+  const lat = Number(settings.weatherLatitude);
+  const lon = Number(settings.weatherLongitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return showMessage && showToast('Add weather latitude/longitude in Settings');
+  appState.data.weather = { ...(appState.data.weather || {}), loading: true, error: '' };
+  saveState();
+  if (showMessage) render();
+  try {
+    const params = new URLSearchParams({
+      latitude: String(lat),
+      longitude: String(lon),
+      current: 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m',
+      hourly: 'temperature_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,relative_humidity_2m',
+      timezone: 'auto',
+      forecast_days: '1',
+      temperature_unit: 'fahrenheit',
+      wind_speed_unit: 'mph',
+      precipitation_unit: 'inch'
+    });
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+    if (!response.ok) throw new Error(`Weather ${response.status}`);
+    const json = await response.json();
+    const hourly = (json.hourly?.time || []).map((time, index) => ({
+      time,
+      temp: json.hourly.temperature_2m?.[index],
+      feels: json.hourly.apparent_temperature?.[index],
+      precip: json.hourly.precipitation_probability?.[index],
+      code: json.hourly.weather_code?.[index],
+      wind: json.hourly.wind_speed_10m?.[index],
+      humidity: json.hourly.relative_humidity_2m?.[index]
+    }));
+    appState.data.weather = {
+      loading: false,
+      fetchedAt: new Date().toISOString(),
+      error: '',
+      current: {
+        time: json.current?.time,
+        temp: json.current?.temperature_2m,
+        feels: json.current?.apparent_temperature,
+        humidity: json.current?.relative_humidity_2m,
+        precipNow: json.current?.precipitation,
+        code: json.current?.weather_code,
+        wind: json.current?.wind_speed_10m
+      },
+      hourly
+    };
+    saveState();
+    if (appState.activeTab === 'today' || showMessage) render();
+    if (showMessage) showToast('Weather updated');
+  } catch (error) {
+    console.warn(error);
+    appState.data.weather = { ...(appState.data.weather || {}), loading: false, error: 'Weather unavailable. Check connection or coordinates.' };
+    saveState();
+    if (appState.activeTab === 'today' || showMessage) render();
+    if (showMessage) showToast('Weather unavailable');
+  }
+}
+
+function weatherCardHtml() {
+  const settings = appState.data.settings;
+  if (!settings.weatherEnabled) {
+    return `<div class="card"><div class="card-title"><div><h3>Weather window</h3><p>Weather guidance is off.</p></div><span class="badge neutral">Off</span></div><div class="toggle-row"><button class="ghost" data-action="jump" data-tab-target="settings">Weather settings</button></div></div>`;
+  }
+  const w = appState.data.weather || {};
+  if (w.loading) return `<div class="card"><div class="card-title"><div><h3>Weather window</h3><p>Checking current conditions and the next few hours…</p></div><span class="badge blue">Loading</span></div></div>`;
+  if (w.error && !w.current) return `<div class="card warning"><div class="card-title"><div><h3>Weather window</h3><p>${escapeHtml(w.error)}</p></div><span class="badge warn">Offline</span></div><div class="toggle-row"><button class="ghost" data-action="refresh-weather">Try again</button><button class="ghost" data-action="jump" data-tab-target="settings">Settings</button></div></div>`;
+  if (!w.current) return `<div class="card"><div class="card-title"><div><h3>Weather window</h3><p>Current conditions and the next 3–6 hours.</p></div><span class="badge neutral">Ready</span></div><div class="toggle-row"><button class="primary" data-action="refresh-weather">Load weather</button></div></div>`;
+  const hours = nextWeatherHours(w.hourly || [], 6);
+  const note = weatherGuidance(w.current, hours);
+  return `<div class="card weather-card">
+    <div class="card-title"><div><h3>Weather window</h3><p>${escapeHtml(settings.weatherLocation || 'Weather')} · now through the next few hours</p></div><span class="badge ${note.badge}">${escapeHtml(note.label)}</span></div>
+    <div class="grid three compact-metrics">
+      <div class="metric mini"><span class="value">${Math.round(w.current.temp ?? 0)}°</span><span class="label">now</span><small>feels ${Math.round(w.current.feels ?? w.current.temp ?? 0)}°</small></div>
+      <div class="metric mini"><span class="value">${Math.round(w.current.humidity ?? 0)}%</span><span class="label">humidity</span><small>${Math.round(w.current.wind ?? 0)} mph wind</small></div>
+      <div class="metric mini"><span class="value">${maxPrecip(hours)}%</span><span class="label">rain risk</span><small>next ${hours.length || 0} hrs</small></div>
+    </div>
+    <p class="note"><strong>Pathfinder note:</strong> ${escapeHtml(note.message)}</p>
+    <div class="hour-strip">${hours.slice(0, 6).map(hourWeatherPill).join('')}</div>
+    <div class="toggle-row"><button class="ghost small" data-action="refresh-weather">Refresh</button></div>
+  </div>`;
+}
+
+function nextWeatherHours(hourly, count = 6) {
+  const now = Date.now();
+  return hourly.filter(hour => new Date(hour.time).getTime() >= now - 1000 * 60 * 45).slice(0, count);
+}
+
+function maxPrecip(hours) {
+  return Math.max(0, ...hours.map(hour => Number(hour.precip || 0)));
+}
+
+function weatherGuidance(current, hours) {
+  const feels = Number(current.feels ?? current.temp ?? 0);
+  const humidity = Number(current.humidity || 0);
+  const rain = maxPrecip(hours);
+  const wind = Number(current.wind || 0);
+  if (rain >= 60) return { label: 'Indoor', badge: 'warn', message: 'Rain or storms are likely soon. Keep movement inside and use the quiet apartment routine or bike.' };
+  if (feels >= 92 || (feels >= 86 && humidity >= 65)) return { label: 'Hot/humid', badge: 'warn', message: 'Heat and humidity are high enough to favor indoor movement. Push water earlier than usual.' };
+  if (feels <= 38 || wind >= 22) return { label: 'Indoor', badge: 'blue', message: 'Cold or windy conditions make indoor mobility, bike, or chair work the better default.' };
+  if (feels >= 55 && feels <= 82 && rain < 35) return { label: 'Good window', badge: '', message: 'Weather looks reasonable. A short walk is a good option if energy and time allow.' };
+  return { label: 'Flexible', badge: 'neutral', message: 'Weather does not force a change. Choose the workout based on energy, soreness, and time.' };
+}
+
+function hourWeatherPill(hour) {
+  const time = new Date(hour.time).toLocaleTimeString([], { hour: 'numeric' });
+  return `<span><strong>${escapeHtml(time)}</strong>${Math.round(hour.feels ?? hour.temp ?? 0)}° · ${Number(hour.precip || 0)}%</span>`;
+}
+
 function renderToday() {
   setTitle('Today');
   const day = getDay();
@@ -673,6 +869,8 @@ function renderToday() {
   const guidance = dailyGuidance(day);
   const workout = recommendedWorkout(day);
   const mode = selectedRoutineMode();
+  ensureWeatherForToday();
+  const routineFocus = routineFocusInfo(day);
 
   $('#app').innerHTML = `
     <section class="hero">
@@ -739,17 +937,18 @@ function renderToday() {
         <div class="card">
           <div class="card-title">
             <div>
-              <h3>${escapeHtml(mode.label)}</h3>
-              <p>Routine builder is live. Check off the pieces that actually happen.</p>
+              <h3>${escapeHtml(routineFocus.title)}</h3>
+              <p>${escapeHtml(routineFocus.message)}</p>
             </div>
             <span class="badge neutral">${routineCompletion(day)}%</span>
           </div>
-          ${routinePreviewHtml(day)}
-          <div class="toggle-row"><button class="ghost" data-action="jump" data-tab-target="routines">Edit routine</button></div>
+          ${routinePreviewHtml(day, true)}
+          <div class="toggle-row"><button class="ghost" data-action="jump" data-tab-target="routines">Open full routine board</button></div>
         </div>
       </div>
 
       <aside class="grid">
+        ${weatherCardHtml()}
         <div class="card" id="quick-checkin-card">
           <div class="card-title">
             <div>
@@ -865,6 +1064,55 @@ function mealEditorCard(key, meal, day) {
   </div>`;
 }
 
+
+function allFoodDatabaseItems() {
+  const online = (appState.data.foodSearchResults || []).map(item => ({ ...item, source: item.source || 'Open Food Facts' }));
+  const map = new Map();
+  [...localFoodDatabase, ...appState.data.foods, ...online].forEach(item => {
+    if (!item?.id) return;
+    map.set(item.id, { ...item, source: item.source || (appState.data.foods.some(f => f.id === item.id) ? 'My foods' : 'Starter database') });
+  });
+  return Array.from(map.values());
+}
+
+function foodDatabaseMatches() {
+  const query = String(appState.data.settings.foodSearch || '').trim().toLowerCase();
+  const items = allFoodDatabaseItems();
+  if (!query) return items.slice(0, 12);
+  const words = query.split(/\s+/).filter(Boolean);
+  return items.filter(item => {
+    const haystack = `${item.name} ${item.serving || ''} ${item.category || ''} ${item.source || ''}`.toLowerCase();
+    return words.every(word => haystack.includes(word));
+  }).slice(0, 24);
+}
+
+function foodDatabaseSearchCard() {
+  const query = appState.data.settings.foodSearch || '';
+  const results = foodDatabaseMatches();
+  const onlineCount = (appState.data.foodSearchResults || []).length;
+  return `<div class="card highlight food-search-card">
+    <div class="card-title"><div><h3>Food database search</h3><p>Search starter foods, saved foods, and optional online packaged-food results.</p></div><span class="badge neutral">${results.length} shown</span></div>
+    <div class="input-row four">
+      <div class="input-group"><label>Search food</label><input id="food-search-input" data-setting-field="foodSearch" value="${escapeHtml(query)}" placeholder="rice, egg, sandwich, yogurt…" /></div>
+      <div class="input-group"><label>Meal</label><select id="db-meal-select"><option value="snack">Snack/other</option>${MEAL_KEYS.map(key => `<option value="${key}">${capitalize(key)}</option>`).join('')}</select></div>
+      <div class="input-group"><label>Servings</label><input id="db-servings" type="number" min="0.1" step="0.25" value="1" /></div>
+      <div class="input-group"><label>Search</label><div class="toggle-row tight"><button class="secondary small" data-action="apply-food-search">Search local</button><button class="ghost small" data-action="search-online-foods">Packaged</button></div></div>
+    </div>
+    <p class="note">Local starter values are estimates. Online packaged results come from Open Food Facts when available; verify labels when precision matters.</p>
+    ${onlineCount ? `<div class="toggle-row"><span class="badge blue">${onlineCount} online results loaded</span><button class="ghost small" data-action="clear-online-foods">Clear online results</button></div>` : ''}
+    <div class="library-grid food-db-results" style="margin-top:14px;">${results.map(foodDatabaseResultCard).join('') || '<p class="note">No matches yet. Try a simpler search.</p>'}</div>
+  </div>`;
+}
+
+function foodDatabaseResultCard(item) {
+  return `<div class="library-item food-result">
+    <strong>${escapeHtml(item.name)}</strong>
+    <small>${escapeHtml(item.serving || 'serving')} · ${Math.round(Number(item.calories || 0))} kcal · ${Number(item.protein || 0)}g protein · ${Number(item.fiber || 0)}g fiber</small>
+    <span class="badge neutral">${escapeHtml(item.source || item.category || 'food')}</span>
+    <div class="toggle-row"><button class="primary small" data-action="add-db-food" data-id="${escapeHtml(item.id)}">Log</button><button class="ghost small" data-action="save-db-food" data-id="${escapeHtml(item.id)}">Save</button></div>
+  </div>`;
+}
+
 function renderFood() {
   setTitle('Food');
   const plan = getPlan();
@@ -885,11 +1133,12 @@ function renderFood() {
             <div class="input-group"><label>Calorie range</label><input data-plan-field="calorieRange" value="${escapeHtml(plan.calorieRange)}" /></div>
           </div>
         </div>
+        ${foodDatabaseSearchCard()}
         <div class="grid three">
           ${MEAL_KEYS.map(key => planMealEditCard(key, plan.meals[key])).join('')}
         </div>
         <div class="card">
-          <div class="card-title"><div><h3>Food library</h3><p>Starter database for simple logging. Add more as real life reveals them.</p></div><span class="badge neutral">${appState.data.foods.length} foods</span></div>
+          <div class="card-title"><div><h3>My foods</h3><p>Foods you saved for fast repeat logging.</p></div><span class="badge neutral">${appState.data.foods.length} foods</span></div>
           <div class="input-row four">
             <div class="input-group"><label>Name</label><input id="food-name" placeholder="Food name" /></div>
             <div class="input-group"><label>Serving</label><input id="food-serving" placeholder="Serving" /></div>
@@ -1052,7 +1301,7 @@ function renderGuide() {
         <div class="card">
           <h3>Quick filters</h3>
           <div class="tag-cloud">${tags.map(tag => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
-          <p class="note">Filters are visual for now. 0.9+ can turn them into searchable filters after cloud sync is handled.</p>
+          <p class="note">Use tags to scan for chair, quiet, posture, recovery, and no-floor movements.</p>
         </div>
         <div class="card warning">
           <h3>Safety rule</h3>
@@ -1069,10 +1318,37 @@ function renderGuide() {
     </section>`;
 }
 
+
+function formSnapshotHtml(item) {
+  const cues = formCuesForExercise(item);
+  return `<div class="form-snapshot">
+    <div class="snapshot-card"><strong>1 · Set up</strong><p>${escapeHtml(cues.setup)}</p></div>
+    <div class="snapshot-card"><strong>2 · Move</strong><p>${escapeHtml(cues.move)}</p></div>
+    <div class="snapshot-card"><strong>3 · Check</strong><p>${escapeHtml(cues.check)}</p></div>
+  </div>`;
+}
+
+function formCuesForExercise(item) {
+  const cueMap = {
+    'chair-sit-to-stand': { setup: 'Feet planted, chair behind you, chest tall.', move: 'Sit back slowly, touch the chair, then stand through your feet.', check: 'Knees point with toes; no sharp knee or back pain.' },
+    'wall-angels': { setup: 'Back near wall, ribs relaxed, arms comfortable.', move: 'Slide arms only through the range your shoulders allow.', check: 'No forcing, shrugging, numbness, or tingling.' },
+    'counter-pushup': { setup: 'Hands on sturdy counter, body in one long line.', move: 'Lower chest toward counter, then push away smoothly.', check: 'Hips do not sag; shoulders stay away from ears.' },
+    'dead-bug': { setup: 'Lie on back, knees bent, belly gently braced.', move: 'Tap one heel at a time while breathing.', check: 'Low back stays controlled; neck stays relaxed.' },
+    'bird-dog': { setup: 'Hands and knees, back flat like a table.', move: 'Reach one leg back; add opposite arm only if stable.', check: 'Hips stay square; move slower than you think.' },
+    'counter-plank': { setup: 'Hands or forearms on counter, feet stepped back.', move: 'Brace belly and hold while breathing normally.', check: 'No hip sag, breath holding, or sharp back pain.' },
+    'chair-march': { setup: 'Sit tall near chair edge and hold sides if needed.', move: 'Lift one knee at a time with a smooth rhythm.', check: 'Stay tall; stop if dizzy or hip pain appears.' },
+    'easy-bike': { setup: 'Low resistance; knees should feel smooth.', move: 'Pedal easy, then settle into a talkable pace.', check: 'Warm effort is okay; grinding knees is not.' },
+    'wall-posture-hold': { setup: 'Stand tall near wall without forcing head back.', move: 'Breathe slowly and lengthen through crown of head.', check: 'Neck stays relaxed; no headache or tingling.' },
+    'hip-flexor-stretch': { setup: 'Split stance, hand on wall/chair for balance.', move: 'Tuck hips gently and shift forward slightly.', check: 'Mild front-hip stretch; no low-back arching.' }
+  };
+  return cueMap[item.id] || { setup: item.steps?.[0] || 'Set up slowly.', move: item.steps?.[1] || 'Move with control.', check: item.mistake || 'Stop for sharp pain.' };
+}
+
 function exerciseDetailCard(item) {
   return `<div class="card highlight guide-detail">
     <div class="card-title"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.category)} · ${escapeHtml(item.purpose)}</p></div><span class="badge">${escapeHtml(item.reps)}</span></div>
     ${exerciseSvg(item.id)}
+    ${formSnapshotHtml(item)}
     <div class="grid two" style="margin-top:14px;">
       <div><h4>How to do it</h4><ol class="step-list">${item.steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol></div>
       <div class="grid">
@@ -1328,6 +1604,17 @@ function renderSettings() {
           </div>
           <p class="note">Pathfinder uses a TDEE estimate from your body stats, then adds logged exercise calories for the projection. It is still an estimate, but it reacts better to current weight and actual workouts.</p>
         </div>
+        <div class="card flat weather-settings-card">
+          <div class="card-title"><div><h3>Weather snippet</h3><p>Used on Today for current conditions and the next few hours.</p></div><span class="badge ${settings.weatherEnabled ? '' : 'neutral'}">${settings.weatherEnabled ? 'On' : 'Off'}</span></div>
+          <div class="input-row three">
+            <div class="input-group"><label>Weather</label><select data-setting-field="weatherEnabled"><option value="true" ${settings.weatherEnabled ? 'selected' : ''}>On</option><option value="false" ${!settings.weatherEnabled ? 'selected' : ''}>Off</option></select></div>
+            ${settingInput('weatherLocation', 'Location label', settings.weatherLocation || '', 'text')}
+            ${settingInput('weatherLatitude', 'Latitude', settings.weatherLatitude ?? '', 'number')}
+            ${settingInput('weatherLongitude', 'Longitude', settings.weatherLongitude ?? '', 'number')}
+          </div>
+          <p class="note">Default is Muskogee, OK. Use latitude/longitude for the place Pathfinder should check. Weather uses Open-Meteo when online and quietly falls back when offline.</p>
+          <div class="toggle-row"><button class="ghost" data-action="refresh-weather">Refresh weather now</button></div>
+        </div>
       </div>
       <aside class="grid">
         <div class="card">
@@ -1399,10 +1686,20 @@ function workoutLibraryCard(workout) {
   return `<div class="library-item"><strong>${escapeHtml(workout.title)}</strong><small>${escapeHtml(workout.focus)} · level ${workout.level} · ${workout.quiet ? 'quiet' : 'normal'}</small><p class="note">${escapeHtml(workout.bestFor || '')}</p><div class="toggle-row"><button class="ghost small" data-action="choose-workout" data-id="${escapeHtml(workout.id)}">Use today</button><button class="ghost small" data-action="open-guide" data-guide-id="${escapeHtml(guideId)}">How to</button></div></div>`;
 }
 
-function routinePreviewHtml(day) {
-  const items = routineItemsForSelectedMode().slice(0, 5);
+function routinePreviewHtml(day, focusOnly = false) {
+  const mode = selectedRoutineMode();
+  let items = routineItemsForSelectedMode();
+  let extra = '';
+  if (focusOnly) {
+    const focus = routineFocusInfo(day);
+    items = (mode[focus.block] || []).slice(0, 8);
+    const missed = earlierRoutineMissCount(day, focus.block);
+    if (missed > 0) extra = `<p class="note"><strong>Missed earlier:</strong> ${missed} item(s). Leave them collapsed unless one truly helps right now.</p>`;
+  } else {
+    items = items.slice(0, 5);
+  }
   if (!items.length) return '<p class="note">No routine items yet.</p>';
-  return `<ul class="routine-list">${items.map(item => `<li class="${day.routine.completedIds[item.id] ? 'done' : ''}"><span>${day.routine.completedIds[item.id] ? '✓' : '○'}</span><span>${escapeHtml(item.text)}</span><button class="ghost small" style="margin-left:auto" data-action="toggle-routine-item" data-id="${escapeHtml(item.id)}">${day.routine.completedIds[item.id] ? 'undo' : 'done'}</button></li>`).join('')}</ul>`;
+  return `${extra}<ul class="routine-list">${items.map(item => `<li class="${day.routine.completedIds[item.id] ? 'done' : ''}"><span>${day.routine.completedIds[item.id] ? '✓' : '○'}</span><span>${escapeHtml(item.text)}</span><button class="ghost small" style="margin-left:auto" data-action="toggle-routine-item" data-id="${escapeHtml(item.id)}">${day.routine.completedIds[item.id] ? 'undo' : 'done'}</button></li>`).join('')}</ul>`;
 }
 
 function selectedRoutineMode() {
@@ -2030,6 +2327,12 @@ function handleAction(action) {
     case 'remove-custom-food': day.meals.customItems.splice(Number(action.dataset.index), 1); saveState(); render(); break;
     case 'quick-add-saved-meal': quickAddSavedMeal(action.dataset.id); break;
     case 'quick-add-food': quickAddFood(action.dataset.id); break;
+    case 'add-db-food': addDatabaseFood(action.dataset.id, false); break;
+    case 'save-db-food': addDatabaseFood(action.dataset.id, true); break;
+    case 'apply-food-search': appState.data.settings.foodSearch = $('#food-search-input')?.value || ''; saveState(); render(); break;
+    case 'search-online-foods': searchOnlineFoods(); break;
+    case 'clear-online-foods': appState.data.foodSearchResults = []; saveState(); render(); showToast('Online results cleared'); break;
+    case 'refresh-weather': refreshWeather(true); break;
     case 'add-food-library': addFoodLibrary(); break;
     case 'add-swap': addSwap(); break;
     case 'restore-default-plan': appState.data.plan = structuredClone(defaultMealPlan); saveState(); render(); showToast('Default plan restored'); break;
@@ -2080,8 +2383,79 @@ function recalcPlanMacros() {
 }
 
 function numericSetting(key, value) {
-  if (['startingWeight', 'goalWeight', 'calorieGoal', 'maintenanceCalories', 'waterGoal', 'bedtimeBufferHours', 'experienceLevel', 'age', 'heightFeet', 'heightInches'].includes(key)) return Number(value || 0);
+  if (['startingWeight', 'goalWeight', 'calorieGoal', 'maintenanceCalories', 'waterGoal', 'bedtimeBufferHours', 'experienceLevel', 'age', 'heightFeet', 'heightInches', 'weatherLatitude', 'weatherLongitude'].includes(key)) return Number(value || 0);
+  if (['weatherEnabled'].includes(key)) return value === true || value === 'true';
   return value;
+}
+
+
+function findFoodDatabaseItem(id) {
+  return allFoodDatabaseItems().find(item => item.id === id);
+}
+
+function addDatabaseFood(id, saveOnly = false) {
+  const item = findFoodDatabaseItem(id);
+  if (!item) return showToast('Food not found');
+  const servings = Math.max(0.1, Number($('#db-servings')?.value || 1));
+  const meal = $('#db-meal-select')?.value || 'snack';
+  const logged = {
+    id: `db-${item.id}-${Date.now()}`,
+    name: `${item.name}${servings !== 1 ? ` × ${servings}` : ''}`,
+    meal,
+    calories: Math.round(Number(item.calories || 0) * servings),
+    protein: Number((Number(item.protein || 0) * servings).toFixed(1)),
+    fiber: Number((Number(item.fiber || 0) * servings).toFixed(1)),
+    createdAt: new Date().toISOString(),
+    source: item.source || 'Food database'
+  };
+  if (saveOnly) {
+    const exists = appState.data.foods.some(food => food.name.toLowerCase() === item.name.toLowerCase() && food.serving === item.serving);
+    if (!exists) appState.data.foods.push({ id: `${slugify(item.name)}-${Date.now()}`, name: item.name, serving: item.serving || 'serving', calories: Number(item.calories || 0), protein: Number(item.protein || 0), fiber: Number(item.fiber || 0), category: item.category || item.source || 'Saved food' });
+    saveState(); render(); showToast('Food saved to My foods');
+    return;
+  }
+  const day = getDay();
+  day.meals.customItems.push(logged);
+  if (MEAL_KEYS.includes(meal) && !day.meals.statuses[meal]) day.meals.statuses[meal] = 'swapped';
+  saveState(); render(); showToast('Food logged');
+}
+
+async function searchOnlineFoods() {
+  const query = String($('#food-search-input')?.value || appState.data.settings.foodSearch || '').trim();
+  appState.data.settings.foodSearch = query;
+  if (!query) return showToast('Type a food search first');
+  showToast('Searching packaged foods…');
+  try {
+    const params = new URLSearchParams({ search_terms: query, search_simple: '1', action: 'process', json: '1', page_size: '12', fields: 'code,product_name,brands,serving_size,nutriments,categories_tags' });
+    const response = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?${params.toString()}`);
+    if (!response.ok) throw new Error(`Open Food Facts ${response.status}`);
+    const json = await response.json();
+    appState.data.foodSearchResults = (json.products || []).map(product => mapOpenFoodFactsProduct(product)).filter(Boolean);
+    saveState(); render();
+    showToast(appState.data.foodSearchResults.length ? 'Online foods loaded' : 'No online foods found');
+  } catch (error) {
+    console.warn(error);
+    showToast('Online food search failed');
+  }
+}
+
+function mapOpenFoodFactsProduct(product) {
+  const nutr = product.nutriments || {};
+  const name = product.product_name || product.brands || '';
+  if (!name) return null;
+  const calories = Number(nutr['energy-kcal_serving'] ?? nutr['energy-kcal_100g'] ?? nutr['energy-kcal'] ?? 0);
+  const protein = Number(nutr.proteins_serving ?? nutr.proteins_100g ?? nutr.proteins ?? 0);
+  const fiber = Number(nutr.fiber_serving ?? nutr.fiber_100g ?? nutr.fiber ?? 0);
+  return {
+    id: `off-${product.code || slugify(name)}-${Date.now()}-${Math.random().toString(16).slice(2,6)}`,
+    name,
+    serving: product.serving_size || (nutr['energy-kcal_serving'] ? '1 serving' : '100 g'),
+    calories: Math.round(calories || 0),
+    protein: Number((protein || 0).toFixed(1)),
+    fiber: Number((fiber || 0).toFixed(1)),
+    category: 'Packaged food',
+    source: 'Open Food Facts'
+  };
 }
 
 function addCustomFood() {
