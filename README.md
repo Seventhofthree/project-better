@@ -1,8 +1,16 @@
-# Pathfinder 0.8.5
+# Pathfinder 0.8.6
 
 Pathfinder is a local-first daily companion app for meals, movement, routines, beginner exercise guidance, progress, and weekly review.
 
-## What changed through 0.8.5
+## What changed through 0.8.6
+
+### 0.8.6 emergency persistence patch
+
+- Added dual localStorage saves plus an IndexedDB mirror.
+- Added save-on-pagehide/visibility-change behavior for mobile Chrome.
+- Added Storage status in Settings with Last saved and Save now.
+- Requested persistent browser storage when supported.
+
 
 ### 0.8.3-style cleanup and prediction
 
@@ -20,7 +28,7 @@ Pathfinder is a local-first daily companion app for meals, movement, routines, b
 - Weather guidance suggests indoor movement, walking, hydration, or flexible movement based on heat, humidity, wind, and rain risk.
 - Added a better exercise guide support layer with setup/move/check form snapshots.
 
-### 0.8.5-style food logging upgrade
+### 0.8.6-style food logging upgrade
 
 - Added a Food database search card.
 - Searches the built-in starter food database, My Foods, and optional online packaged-food results.

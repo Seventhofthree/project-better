@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pathfinder-0.8.5';
+const CACHE_NAME = 'pathfinder-0.8.6';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', event => {

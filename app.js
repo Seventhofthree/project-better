@@ -1,12 +1,19 @@
-/* Pathfinder 0.8.5
+/* Pathfinder 0.8.6
    Local-first daily companion app. No account, no server, no dependencies.
-   0.8.5 adds context-aware Today focus, weather guidance,
-   better exercise guide support, and food database-assisted logging.
+   0.8.6 is an emergency persistence patch: dual localStorage saves,
+   IndexedDB mirror, pagehide autosave, and storage status checks.
 */
 
-const APP_VERSION = '0.8.5';
+const APP_VERSION = '0.8.6';
 const STORAGE_KEY = 'pathfinder.state.v8';
-const LEGACY_KEYS = ['pathfinder.state.v7', 'pathfinder.state.v1', 'pathfinder.0.1.state'];
+const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
+const IDB_DB_NAME = 'pathfinder-local-state';
+const IDB_STORE_NAME = 'state';
+const IDB_STATE_KEY = 'main';
+const LEGACY_KEYS = ['pathfinder.state.v8.backup', 'pathfinder.state.v7', 'pathfinder.state.v1', 'pathfinder.0.1.state'];
+let storageLoadSource = 'default';
+let storageLastError = '';
+let saveTimer = null;
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'];
 const ROUTINE_BLOCKS = ['morning', 'betweenLunchDinner', 'evening'];
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -385,6 +392,7 @@ const appState = {
 function defaultState() {
   return {
     version: APP_VERSION,
+    meta: { createdAt: new Date().toISOString(), updatedAt: '' },
     settings: {
       name: 'Joshua',
       startingWeight: 305,
@@ -424,11 +432,12 @@ function defaultState() {
 
 function loadState() {
   try {
-    let raw = localStorage.getItem(STORAGE_KEY);
+    let raw = safeLocalGet(STORAGE_KEY);
+    if (raw) storageLoadSource = 'localStorage';
     if (!raw) {
       for (const key of LEGACY_KEYS) {
-        raw = localStorage.getItem(key);
-        if (raw) break;
+        raw = safeLocalGet(key);
+        if (raw) { storageLoadSource = key === STORAGE_BACKUP_KEY ? 'localStorage backup' : 'legacy localStorage'; break; }
       }
     }
     if (!raw) return defaultState();
@@ -438,6 +447,7 @@ function loadState() {
     migrateState(migrated);
     return migrated;
   } catch (error) {
+    storageLastError = error.message || String(error);
     console.warn('Unable to load saved state:', error);
     return defaultState();
   }
@@ -485,9 +495,115 @@ function mergeRoutineDefaults(existing) {
   return merged;
 }
 
+function safeLocalGet(key) {
+  try { return localStorage.getItem(key); }
+  catch (error) { storageLastError = error.message || String(error); return null; }
+}
+
 function saveState() {
   appState.data.version = APP_VERSION;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(appState.data));
+  appState.data.meta = appState.data.meta || {};
+  appState.data.meta.updatedAt = new Date().toISOString();
+  const payload = JSON.stringify(appState.data);
+  try {
+    localStorage.setItem(STORAGE_KEY, payload);
+    localStorage.setItem(STORAGE_BACKUP_KEY, payload);
+    storageLastError = '';
+  } catch (error) {
+    storageLastError = error.message || String(error);
+    console.warn('Unable to save Pathfinder state to localStorage:', error);
+    showToast?.('Storage warning: export a backup');
+  }
+  queueIndexedDbSave(payload);
+}
+
+function queueIndexedDbSave(payload) {
+  if (!('indexedDB' in window)) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => savePayloadToIndexedDb(payload).catch(error => {
+    storageLastError = error.message || String(error);
+    console.warn('IndexedDB save failed:', error);
+  }), 80);
+}
+
+function openPathfinderDb() {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) return reject(new Error('IndexedDB unavailable'));
+    const request = indexedDB.open(IDB_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IDB_STORE_NAME)) db.createObjectStore(IDB_STORE_NAME, { keyPath: 'id' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+  });
+}
+
+async function savePayloadToIndexedDb(payload) {
+  const db = await openPathfinderDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+    tx.objectStore(IDB_STORE_NAME).put({ id: IDB_STATE_KEY, payload, updatedAt: new Date().toISOString() });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
+  });
+  db.close();
+}
+
+async function loadPayloadFromIndexedDb() {
+  const db = await openPathfinderDb();
+  const record = await new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE_NAME, 'readonly');
+    const request = tx.objectStore(IDB_STORE_NAME).get(IDB_STATE_KEY);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error('IndexedDB read failed'));
+  });
+  db.close();
+  return record?.payload || null;
+}
+
+function stateHasUserData(state) {
+  if (!state) return false;
+  if (state.meta?.updatedAt) return true;
+  if (state.days && Object.keys(state.days).length) return true;
+  if (state.foods && state.foods.length !== defaultFoods.length) return true;
+  if (state.savedMeals && state.savedMeals.length !== defaultSavedMeals.length) return true;
+  return false;
+}
+
+async function hydrateFromIndexedDb() {
+  try {
+    const payload = await loadPayloadFromIndexedDb();
+    if (!payload) return;
+    const parsed = JSON.parse(payload);
+    const migrated = mergeDefaults(defaultState(), parsed);
+    migrated.version = APP_VERSION;
+    migrateState(migrated);
+    const currentUpdated = Date.parse(appState.data.meta?.updatedAt || '') || 0;
+    const idbUpdated = Date.parse(migrated.meta?.updatedAt || '') || 0;
+    if (storageLoadSource === 'default' || idbUpdated > currentUpdated || (!stateHasUserData(appState.data) && stateHasUserData(migrated))) {
+      appState.data = migrated;
+      storageLoadSource = 'IndexedDB mirror';
+      saveState();
+      render();
+      showToast('Saved Pathfinder data restored');
+    }
+  } catch (error) {
+    storageLastError = error.message || String(error);
+    console.warn('IndexedDB hydration skipped:', error);
+  }
+}
+
+async function requestPersistentStorage() {
+  try {
+    if (navigator.storage?.persist) await navigator.storage.persist();
+  } catch (error) {
+    console.warn('Persistent storage request skipped:', error);
+  }
+}
+
+function flushStateOnPageLeave() {
+  try { saveState(); } catch (error) { console.warn('Final save failed:', error); }
 }
 
 function toDateKey(date) {
@@ -1618,6 +1734,17 @@ function renderSettings() {
       </div>
       <aside class="grid">
         <div class="card">
+          <h3>Storage status</h3>
+          <p>Saved on this device/browser. Cloud sync starts in 0.9.</p>
+          <div class="stack small-stack">
+            <span class="badge ${storageLastError ? 'danger' : ''}">${storageLastError ? 'Storage warning' : 'Local save ready'}</span>
+            <small>Loaded from: ${escapeHtml(storageLoadSource)}</small>
+            <small>Last saved: ${escapeHtml(appState.data.meta?.updatedAt ? new Date(appState.data.meta.updatedAt).toLocaleString() : 'Not saved yet')}</small>
+            ${storageLastError ? `<small>${escapeHtml(storageLastError)}</small>` : ''}
+          </div>
+          <div class="toggle-row" style="margin-top:12px;"><button class="ghost small" data-action="force-save">Save now</button></div>
+        </div>
+        <div class="card">
           <h3>Backup / restore</h3>
           <p>Use this before switching devices or testing risky changes.</p>
           <div class="toggle-row">
@@ -2346,6 +2473,7 @@ function handleAction(action) {
     case 'add-routine-item': addRoutineItem(); break;
     case 'copy-review': navigator.clipboard?.writeText(buildWeeklyReview(weeklyStats(appState.selectedDate))); showToast('Review copied'); break;
     case 'copy-ai-summary': navigator.clipboard?.writeText(buildAiReviewPacket(weeklyStats(appState.selectedDate))); showToast('AI packet copied'); break;
+    case 'force-save': saveState(); render(); showToast('Saved on this device'); break;
     case 'export-csv': exportCsv(); break;
     case 'export-json': exportJson(); break;
     case 'reset-app': if (confirm('Reset Pathfinder data on this browser?')) { appState.data = defaultState(); saveState(); render(); showToast('Reset complete'); } break;
@@ -2528,3 +2656,7 @@ function registerServiceWorker() {
 wireEvents();
 render();
 registerServiceWorker();
+requestPersistentStorage();
+hydrateFromIndexedDb();
+window.addEventListener('pagehide', flushStateOnPageLeave);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushStateOnPageLeave(); });
