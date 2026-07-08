@@ -38,13 +38,18 @@
       <button data-tab="settings">Settings</button>
     </nav>
 
-    <main id="app" tabindex="-1"></main>
+    <main id="app" tabindex="-1">
+      <section class="card highlight">
+        <h2>Loading Pathfinder…</h2>
+        <p>Restoring saved local data before the app starts.</p>
+      </section>
+    </main>
   </div>
 
   <template id="toast-template">
     <div class="toast" role="status"></div>
   </template>
 
-  <script src="app.js"></script>
+  <script src="persistence-bootstrap.js?v=0.8.7"></script>
 </body>
 </html>
