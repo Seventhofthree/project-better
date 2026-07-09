@@ -1,21 +1,34 @@
 (() => {
-  const BOOTSTRAP_VERSION = '0.8.7';
+  const BOOTSTRAP_VERSION = '0.8.7.1';
+  const RELEASE_LABEL = '0.8.7.1 Version Badge Patch';
+  const CORE_APP_VERSION = '0.8.6';
+  const SERVICE_WORKER_CACHE = 'pathfinder-0.8.7.1';
   const STORAGE_KEY = 'pathfinder.state.v8';
   const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
   const LEGACY_KEYS = ['pathfinder.state.v8.backup', 'pathfinder.state.v7', 'pathfinder.state.v1', 'pathfinder.0.1.state'];
   const IDB_DB_NAME = 'pathfinder-local-state';
   const IDB_STORE_NAME = 'state';
   const IDB_STATE_KEY = 'main';
-  const APP_SCRIPT = './app.js?v=0.8.7';
+  const APP_SCRIPT = './app.js?v=0.8.7.1';
   const BOOTSTRAP_STATUS_KEY = 'pathfinder.bootstrap.status.v1';
 
   const status = {
     version: BOOTSTRAP_VERSION,
+    release: RELEASE_LABEL,
+    coreAppVersion: CORE_APP_VERSION,
+    serviceWorkerCache: SERVICE_WORKER_CACHE,
     startedAt: new Date().toISOString(),
     loadedSource: 'unknown',
     restoredFromIndexedDb: false,
     restoredFromBackup: false,
     error: ''
+  };
+
+  window.__PATHFINDER_RELEASE__ = {
+    release: RELEASE_LABEL,
+    bootstrapVersion: BOOTSTRAP_VERSION,
+    coreAppVersion: CORE_APP_VERSION,
+    serviceWorkerCache: SERVICE_WORKER_CACHE
   };
 
   function setLoadingMessage(message) {
@@ -208,7 +221,7 @@
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter(key => key.startsWith('pathfinder-') && key !== 'pathfinder-0.8.7')
+          .filter(key => key.startsWith('pathfinder-') && key !== SERVICE_WORKER_CACHE)
           .map(key => caches.delete(key))
       );
     } catch {
@@ -224,6 +237,73 @@
       // Ignore; the main app still has its own storage warning.
     }
     window.__PATHFINDER_BOOTSTRAP__ = { ...status };
+  }
+
+  function readBootstrapStatus() {
+    const stored = safeParse(localGet(BOOTSTRAP_STATUS_KEY));
+    return stored || status;
+  }
+
+  function formatDateTime(value) {
+    if (!value) return 'Not recorded';
+
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
+    }
+  }
+
+  function injectVersionBadge() {
+    const app = document.querySelector('#app');
+    const pageTitle = document.querySelector('#page-title')?.textContent?.trim();
+
+    if (!app || pageTitle !== 'Settings') return;
+    if (app.querySelector('#pathfinder-version-card')) return;
+
+    const currentStatus = readBootstrapStatus();
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.id = 'pathfinder-version-card';
+    card.innerHTML = `
+      <div class="card-title">
+        <div>
+          <h3>App version</h3>
+          <p>Use this to confirm you are testing the newest pushed update.</p>
+        </div>
+        <span class="badge blue">${escapeHtml(RELEASE_LABEL)}</span>
+      </div>
+      <div class="stack small-stack">
+        <small>Bootstrap: ${escapeHtml(BOOTSTRAP_VERSION)}</small>
+        <small>Core app.js: ${escapeHtml(CORE_APP_VERSION)}</small>
+        <small>Service worker cache: ${escapeHtml(SERVICE_WORKER_CACHE)}</small>
+        <small>Loaded from: ${escapeHtml(currentStatus.loadedSource || 'unknown')}</small>
+        <small>Bootstrap finished: ${escapeHtml(formatDateTime(currentStatus.finishedAt))}</small>
+      </div>
+      <p class="note">For now, the visible release number comes from the bootstrap/update layer. The core app.js version will be unified during the 0.8.8/0.8.9 cleanup.</p>
+    `;
+
+    const aside = app.querySelector('aside.grid');
+    if (aside) aside.prepend(card);
+    else app.prepend(card);
+  }
+
+  function installVersionBadge() {
+    injectVersionBadge();
+
+    const app = document.querySelector('#app');
+    if (app) {
+      const observer = new MutationObserver(() => injectVersionBadge());
+      observer.observe(app, { childList: true });
+    }
+
+    document.addEventListener('click', () => {
+      window.setTimeout(injectVersionBadge, 0);
+    }, true);
+
+    document.addEventListener('change', () => {
+      window.setTimeout(injectVersionBadge, 0);
+    }, true);
   }
 
   function loadAppScript() {
@@ -277,6 +357,7 @@
 
     try {
       await loadAppScript();
+      installVersionBadge();
     } catch (error) {
       setLoadingMessage(`Pathfinder could not load app.js. ${error.message || error}`);
       throw error;
