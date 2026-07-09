@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.8
+/* Pathfinder 0.9.8.1
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.8 is a Bug Sweep release built from the verified 0.9.7 source.
-   Tightens copy handling, release readiness, and small runtime guards without changing persistence.
+   0.9.8.1 is a Settings Hotfix release built from the 0.9.8 bug sweep.
+   Fixes the Release readiness card crash without changing persistence.
 */
 
-const APP_VERSION = '0.9.8';
+const APP_VERSION = '0.9.8.1';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -953,26 +953,29 @@ async function copyTextWithFallback(text, successMessage, consoleLabel) {
 
 function releaseReadinessCardHtml() {
   const diagnostics = storageDiagnostics();
+  const primary = diagnostics.find(item => item.label === 'localStorage primary') || {};
+  const backup = diagnostics.find(item => item.label === 'localStorage backup') || {};
   const activeTabOk = APP_TABS.includes(appState.activeTab);
   const dateOk = validDateKey(appState.selectedDate);
   const saveReady = !storageLastError;
+  const overallReady = activeTabOk && dateOk && saveReady;
   return `<div class="card">
     <div class="card-title">
       <div>
         <h3>Release readiness</h3>
         <p>Quick check for common update problems before moving to the next patch.</p>
       </div>
-      <span class="badge ${activeTabOk && dateOk && saveReady ? 'blue' : 'warn'}">${activeTabOk && dateOk && saveReady ? 'Looks ready' : 'Check notes'}</span>
+      <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '0.9.8' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
+      <li><span>${APP_VERSION === '0.9.8.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
-      <li><span>${diagnostics.primary.valid ? '✓' : '○'}</span><span>Primary local save readable</span></li>
-      <li><span>${diagnostics.backup.valid ? '✓' : '○'}</span><span>Backup local save readable</span></li>
+      <li><span>${primary.valid ? '✓' : '○'}</span><span>Primary local save: ${escapeHtml(primary.valid ? 'readable' : primary.reason || 'not readable')}</span></li>
+      <li><span>${backup.valid ? '✓' : '○'}</span><span>Backup local save: ${escapeHtml(backup.valid ? 'readable' : backup.reason || 'not readable')}</span></li>
     </ul>
-    <p class="note">This does not replace testing, but it catches the mistakes that caused the roughest update failures earlier.</p>
+    <p class="note">This card is read-only. It does not repair or overwrite saved data.</p>
   </div>`;
 }
 
