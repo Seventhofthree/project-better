@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.5
+/* Pathfinder 0.9.6
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.5 is a Saved Food / Calorie Counter Polish release built from the verified 0.9.4 source.
-   Makes repeat foods, estimates, and serving multipliers easier without changing persistence.
+   0.9.6 is an Assistant Layer release built from the verified 0.9.5 source.
+   Adds companion-style daily guidance using existing logged data without changing persistence.
 */
 
-const APP_VERSION = '0.9.5';
+const APP_VERSION = '0.9.6';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -1089,11 +1089,218 @@ function hourWeatherPill(hour) {
   return `<span><strong>${escapeHtml(time)}</strong>${Math.round(hour.feels ?? hour.temp ?? 0)}° · ${Number(hour.precip || 0)}%</span>`;
 }
 
+
+function companionToneIntro() {
+  const tone = appState.data.settings.assistantTone || 'friendly';
+  if (tone === 'direct') return 'Priority check.';
+  if (tone === 'gentle') return 'Gentle version.';
+  return 'Friendly nudge.';
+}
+
+function foodNextStep(day, totals = totalsForDay(day)) {
+  const openMeals = MEAL_KEYS.filter(key => !mealLogged(day, key));
+  if (openMeals.length) return `Close ${openMeals[0]} with Ate plan, Swapped, Skipped, or a quick estimate.`;
+  const calorieGoal = Number(appState.data.settings.calorieGoal || totals.plannedCalories || 0);
+  const room = calorieGoal - totals.loggedCalories;
+  if (room < -150) return 'Food is logged. Keep the rest of the day boring and do not turn one overage into a spiral.';
+  if (Number(totals.loggedProtein || 0) < Number(totals.plannedProtein || 0) - 20) return 'Protein is short. Use a simple protein backup if you are still hungry.';
+  return 'Food loop is usable today. Do not overwork it.';
+}
+
+function movementNextStep(day) {
+  if (day.exercise.status === 'full') return 'Full workout is already logged. Stop trying to earn extra credit.';
+  if (day.exercise.status === 'minimum') return 'Minimum win is logged. That counts. Optional stretch only if it feels good.';
+  if (day.exercise.status === 'recovery') return 'Recovery is logged. Protect the habit and move on.';
+  if (day.checkin.energy === 'Low' || day.checkin.sleep === 'Poor' || day.checkin.stress === 'High') return 'Take the minimum-win movement option. Five quiet minutes is enough.';
+  return 'Do the planned movement before the evening gets away from you.';
+}
+
+function routineNextStepText(day) {
+  if (routineCompletion(day) >= 80) return 'Routine is mostly handled. Do not add chores.';
+  const items = routineItemsForSelectedMode().filter(item => !day.routine.completedIds[item.id]);
+  if (items.length) return `Next routine item: ${items[0].text}`;
+  return 'Routine board is clear for this mode.';
+}
+
+function windDownNextStep(day) {
+  if (day.windDown.completed) return 'Wind-down is done. Let the day be finished.';
+  if (completionScore(day) >= 70) return 'Close with one sentence: what helped today?';
+  return 'Close with one sentence: what made today harder, and what would make tomorrow easier?';
+}
+
+function companionFocus(day, stats) {
+  const totals = totalsForDay(day);
+  const focusItems = [
+    { key: 'food', label: 'Food', text: foodNextStep(day, totals), done: mealLogComplete(day), action: 'meals' },
+    { key: 'movement', label: 'Movement', text: movementNextStep(day), done: ['full','minimum','recovery'].includes(day.exercise.status), action: 'exercise' },
+    { key: 'routine', label: 'Routine', text: routineNextStepText(day), done: routineCompletion(day) >= 80, action: 'routines' },
+    { key: 'winddown', label: 'Wind-down', text: windDownNextStep(day), done: !!day.windDown.completed, action: 'today' }
+  ];
+  const priority = focusItems.find(item => !item.done) || focusItems[0];
+  const weeklyPattern = stats.mealLogDays < 4
+    ? 'This week needs food logging more than new rules.'
+    : stats.workouts < 3
+      ? 'This week needs smaller movement, not harder movement.'
+      : stats.windDowns < 3
+        ? 'This week needs a calmer close at night.'
+        : 'The week is building. Repeat the simple version.';
+  return { priority, focusItems, weeklyPattern };
+}
+
+function companionTodayCardHtml(day, stats) {
+  const focus = companionFocus(day, stats);
+  const score = completionScore(day);
+  const badgeClass = score >= 75 ? '' : score >= 45 ? 'blue' : 'neutral';
+  return `<section class="card companion-card">
+    <div class="card-title">
+      <div>
+        <h3>${escapeHtml(companionToneIntro())} Your next best step</h3>
+        <p>${escapeHtml(focus.priority.text)}</p>
+      </div>
+      <span class="badge ${badgeClass}">${score}% today</span>
+    </div>
+    <div class="grid four">
+      ${focus.focusItems.map(item => `<div class="metric"><span class="value">${item.done ? 'done' : 'open'}</span><span class="label">${escapeHtml(item.label)}</span><small>${escapeHtml(item.done ? 'handled' : item.text)}</small></div>`).join('')}
+    </div>
+    <p class="note"><strong>Pattern:</strong> ${escapeHtml(focus.weeklyPattern)}</p>
+    <div class="toggle-row">
+      <button class="primary small" data-action="jump" data-tab-target="${escapeHtml(focus.priority.action)}">Go to ${escapeHtml(focus.priority.label)}</button>
+      <button class="ghost small" data-action="jump" data-tab-target="assistant">Open full brief</button>
+    </div>
+  </section>`;
+}
+
+function morningBriefCardHtml(day, stats) {
+  const focus = companionFocus(day, stats);
+  const trend = weightTrendDetail(stats);
+  const recentFood = recentLoggedFoods(1)[0];
+  return `<div class="card highlight">
+    <div class="card-title">
+      <div>
+        <h3>Morning brief</h3>
+        <p>Simple plan for today based on current logs.</p>
+      </div>
+      <span class="badge blue">${escapeHtml(focus.priority.label)}</span>
+    </div>
+    <div class="assistant-output">${escapeHtml([
+      `${companionToneIntro()} ${focus.priority.text}`,
+      `Food: ${foodNextStep(day)}`,
+      `Movement: ${movementNextStep(day)}`,
+      `Routine: ${routineNextStepText(day)}`,
+      `Scale context: ${trend.meaning}`,
+      recentFood ? `Useful repeat food: ${recentFood.name} (${Math.round(recentFood.calories)} kcal).` : 'Useful repeat food: none yet. Log a real-world meal once and it will show up here.'
+    ].join('\n\n'))}</div>
+  </div>`;
+}
+
+function nextActionStackHtml(day, stats) {
+  const focus = companionFocus(day, stats);
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Next action stack</h3>
+        <p>Do these in order. Stop when the day is good enough.</p>
+      </div>
+      <span class="badge neutral">${escapeHtml(focus.priority.label)} first</span>
+    </div>
+    <ul class="check-list mini-list">
+      ${focus.focusItems.map(item => `<li><span>${item.done ? '✓' : '○'}</span><span><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.text)}</span></li>`).join('')}
+    </ul>
+    <p class="note"><strong>Rule:</strong> finish the first open item before browsing for a better plan.</p>
+  </div>`;
+}
+
+function eveningWindDownCoachHtml(day) {
+  const recap = eveningRecap(day);
+  const prompt = day.windDown.completed
+    ? 'You already closed the loop. Let that count.'
+    : 'Use one sentence. What made today easier or harder?';
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Evening wind-down coach</h3>
+        <p>${escapeHtml(prompt)}</p>
+      </div>
+      <span class="badge ${day.windDown.completed ? '' : 'neutral'}">${day.windDown.completed ? 'done' : 'open'}</span>
+    </div>
+    <div class="assistant-output">${escapeHtml(recap)}</div>
+    <div class="toggle-row">
+      <button class="secondary small" data-action="jump" data-tab-target="today">Open wind-down</button>
+      <button class="ghost small" data-action="jump" data-tab-target="review">Open review</button>
+    </div>
+  </div>`;
+}
+
+function whatChangedCoachHtml(stats) {
+  const previous = weeklyStats(shiftDate(stats.start, -1));
+  const scoreDelta = stats.score - previous.score;
+  const mealDelta = stats.mealLogDays - previous.mealLogDays;
+  const moveDelta = stats.workouts - previous.workouts;
+  const windDelta = stats.windDowns - previous.windDowns;
+  const bestChange = [
+    { label: 'score', value: scoreDelta, text: `${deltaText(scoreDelta, '%')} score` },
+    { label: 'meal logging', value: mealDelta, text: `${deltaText(mealDelta, ' day(s)')} meal logging` },
+    { label: 'movement', value: moveDelta, text: `${deltaText(moveDelta, ' day(s)')} movement` },
+    { label: 'wind-down', value: windDelta, text: `${deltaText(windDelta, ' day(s)')} wind-down` }
+  ].sort((a, b) => b.value - a.value)[0];
+  const watch = stats.mealLogDays < 4 ? 'food logging' : stats.workouts < 3 ? 'minimum movement' : stats.windDowns < 3 ? 'wind-down' : 'consistency';
+  return `<div class="card">
+    <h3>What changed?</h3>
+    <div class="assistant-output">${escapeHtml(`Compared with the previous 7-day window:\nScore: ${deltaText(scoreDelta, '%')}\nMeal-log days: ${deltaText(mealDelta, ' day(s)')}\nMovement days: ${deltaText(moveDelta, ' day(s)')}\nWind-downs: ${deltaText(windDelta, ' day(s)')}\n\nBest movement in the data: ${bestChange.text}.\nWatch next: ${watch}.`)}</div>
+  </div>`;
+}
+
+function bodyExpectationCoachHtml(stats) {
+  return `<div class="card">
+    <h3>Body / weight expectation</h3>
+    <p>${escapeHtml(forecastText(stats))}</p>
+    <p class="note">This is rough paper math from logged food and your maintenance estimate. Use it to choose the next boring action, not to panic.</p>
+  </div>`;
+}
+
+function companionPacketText(day, stats) {
+  const focus = companionFocus(day, stats);
+  return [
+    `Pathfinder ${APP_VERSION} companion packet`,
+    `Date: ${formatDate(appState.selectedDate)}`,
+    `Today score: ${completionScore(day)}%`,
+    `Priority: ${focus.priority.label}`,
+    `Next best step: ${focus.priority.text}`,
+    '',
+    'Today status:',
+    `- Food: ${foodNextStep(day)}`,
+    `- Movement: ${movementNextStep(day)}`,
+    `- Routine: ${routineNextStepText(day)}`,
+    `- Wind-down: ${windDownNextStep(day)}`,
+    '',
+    'Weekly pattern:',
+    `- ${focus.weeklyPattern}`,
+    `- Meal-log days: ${stats.mealLogDays}/7`,
+    `- Movement days: ${stats.workouts}/7`,
+    `- Wind-downs: ${stats.windDowns}/7`,
+    '',
+    'Expectation:',
+    forecastText(stats)
+  ].join('\n');
+}
+
+async function copyCompanionPacket() {
+  const text = companionPacketText(readDay(appState.selectedDate), weeklyStats(appState.selectedDate));
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Companion packet copied');
+  } catch {
+    console.log('Pathfinder companion packet:', text);
+    showToast('Clipboard blocked; packet printed to console');
+  }
+}
+
 function renderToday() {
   setTitle('Today');
   const day = getDay();
   const totals = totalsForDay(day);
   const score = completionScore(day);
+  const stats = weeklyStats(appState.selectedDate);
   const guidance = dailyGuidance(day);
   const workout = recommendedWorkout(day);
   const mode = selectedRoutineMode();
@@ -1117,6 +1324,8 @@ function renderToday() {
         <p class="note"><strong>Goal:</strong> log food honestly, learn the movements, and use the projection as a direction check instead of a promise.</p>
       </div>
     </section>
+
+    ${companionTodayCardHtml(day, stats)}
 
     <section class="progress-row" aria-label="Daily routine progress">
       ${stepCard('Breakfast', getPlan().meals.breakfast.shortLabel, mealLogged(day, 'breakfast'), mealStatusLabels[statusForMeal(day, 'breakfast')])}
@@ -1950,39 +2159,43 @@ function renderAssistant() {
   setTitle('Assistant');
   const day = getDay();
   const stats = weeklyStats(appState.selectedDate);
+  const focus = companionFocus(day, stats);
   $('#app').innerHTML = `
     <section class="grid sidebar">
       <div class="grid">
-        <div class="card highlight">
-          <div class="card-title">
-            <div>
-              <h3>Pathfinder brief</h3>
-              <p>Morning brief, evening recap, what changed, upcoming focus, and body/weight expectation summary.</p>
-            </div>
-            <span class="badge blue">Assistant layer</span>
-          </div>
-          <div class="assistant-output">${assistantBrief(day, stats)}</div>
-        </div>
+        ${morningBriefCardHtml(day, stats)}
+        ${nextActionStackHtml(day, stats)}
         <div class="grid two">
-          <div class="card">
-            <h3>Evening recap</h3>
-            <div class="assistant-output">${eveningRecap(day)}</div>
-          </div>
-          <div class="card">
-            <h3>What changed?</h3>
-            <div class="assistant-output">${whatChanged(stats)}</div>
-          </div>
+          ${eveningWindDownCoachHtml(day)}
+          ${whatChangedCoachHtml(stats)}
         </div>
         <div class="card">
-          <h3>Upcoming focus</h3>
-          <div class="assistant-output">${upcomingFocus(stats)}</div>
+          <div class="card-title">
+            <div>
+              <h3>Upcoming focus</h3>
+              <p>One useful direction. Not a whole life overhaul.</p>
+            </div>
+            <span class="badge neutral">${escapeHtml(focus.priority.label)}</span>
+          </div>
+          <div class="assistant-output">${escapeHtml(upcomingFocus(stats))}</div>
         </div>
       </div>
       <aside class="grid">
+        ${bodyExpectationCoachHtml(stats)}
         <div class="card">
-          <h3>Body/weight expectation</h3>
-          <p>${escapeHtml(forecastText(stats))}</p>
-          <p class="note">This is rough math from logged food and your maintenance estimate. It is a direction check, not a promise.</p>
+          <h3>Quick jumps</h3>
+          <p>Go straight to the area Pathfinder thinks matters most.</p>
+          <div class="toggle-row">
+            <button class="primary small" data-action="jump" data-tab-target="${escapeHtml(focus.priority.action)}">Open ${escapeHtml(focus.priority.label)}</button>
+            <button class="ghost small" data-action="jump" data-tab-target="meals">Meals</button>
+            <button class="ghost small" data-action="jump" data-tab-target="exercise">Exercise</button>
+            <button class="ghost small" data-action="jump" data-tab-target="review">Review</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Copy companion packet</h3>
+          <p>Copy the current brief, weekly pattern, and rough expectation if you want deeper analysis later.</p>
+          <div class="toggle-row"><button class="secondary small" data-action="copy-companion-packet">Copy packet</button></div>
         </div>
         <div class="card">
           <h3>Assistant settings</h3>
@@ -1992,7 +2205,6 @@ function renderAssistant() {
       </aside>
     </section>`;
 }
-
 
 function formatSignedNumber(value, decimals = 1, suffix = '') {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -3336,6 +3548,7 @@ function handleAction(action) {
     case 'force-save': saveState(); render(); showToast('Saved on this device'); break;
     case 'run-save-test': runSaveTest(); break;
     case 'copy-storage-debug': copyStorageDebugInfo(); break;
+    case 'copy-companion-packet': copyCompanionPacket(); break;
     case 'export-csv': exportCsv(); break;
     case 'export-json': exportJson(); break;
     case 'reset-app': if (confirm('Reset Pathfinder data on this browser?')) { appState.data = defaultState(); saveState(); render(); showToast('Reset complete'); } break;
