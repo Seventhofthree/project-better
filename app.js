@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.7
+/* Pathfinder 0.9.8
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.7 is a Mobile / PWA Polish release built from the verified 0.9.6 source.
-   Adds mobile guidance, compact mode, and app status messaging without changing persistence.
+   0.9.8 is a Bug Sweep release built from the verified 0.9.7 source.
+   Tightens copy handling, release readiness, and small runtime guards without changing persistence.
 */
 
-const APP_VERSION = '0.9.7';
+const APP_VERSION = '0.9.8';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -17,6 +17,7 @@ let storageLastError = '';
 let saveTimer = null;
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'];
 const ROUTINE_BLOCKS = ['morning', 'betweenLunchDinner', 'evening'];
+const APP_TABS = ['today', 'meals', 'food', 'exercise', 'guide', 'routines', 'assistant', 'progress', 'review', 'history', 'settings'];
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 const todayKey = () => toDateKey(new Date());
@@ -922,7 +923,69 @@ function dataQuality(day) {
 
 function setTitle(title) { $('#page-title').textContent = title; }
 
+
+function validDateKey(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+  const date = fromDateKey(value);
+  return !Number.isNaN(date.getTime()) && toDateKey(date) === value;
+}
+
+function normalizeRuntimeState() {
+  if (!validDateKey(appState.selectedDate)) appState.selectedDate = todayKey();
+  if (!APP_TABS.includes(appState.activeTab)) appState.activeTab = 'today';
+  if (!appState.data || typeof appState.data !== 'object') appState.data = defaultState();
+  if (!appState.data.settings || typeof appState.data.settings !== 'object') appState.data.settings = defaultState().settings;
+  if (!appState.data.days || typeof appState.data.days !== 'object') appState.data.days = {};
+}
+
+async function copyTextWithFallback(text, successMessage, consoleLabel) {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+    await navigator.clipboard.writeText(text);
+    showToast(successMessage);
+    return true;
+  } catch (error) {
+    console.log(consoleLabel || 'Pathfinder copy fallback', text);
+    showToast('Clipboard blocked; printed to console');
+    return false;
+  }
+}
+
+function releaseReadinessCardHtml() {
+  const diagnostics = storageDiagnostics();
+  const activeTabOk = APP_TABS.includes(appState.activeTab);
+  const dateOk = validDateKey(appState.selectedDate);
+  const saveReady = !storageLastError;
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Release readiness</h3>
+        <p>Quick check for common update problems before moving to the next patch.</p>
+      </div>
+      <span class="badge ${activeTabOk && dateOk && saveReady ? 'blue' : 'warn'}">${activeTabOk && dateOk && saveReady ? 'Looks ready' : 'Check notes'}</span>
+    </div>
+    <ul class="check-list mini-list">
+      <li><span>${APP_VERSION === '0.9.8' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
+      <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
+      <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
+      <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
+      <li><span>${diagnostics.primary.valid ? '✓' : '○'}</span><span>Primary local save readable</span></li>
+      <li><span>${diagnostics.backup.valid ? '✓' : '○'}</span><span>Backup local save readable</span></li>
+    </ul>
+    <p class="note">This does not replace testing, but it catches the mistakes that caused the roughest update failures earlier.</p>
+  </div>`;
+}
+
+async function copyWeeklyReview() {
+  await copyTextWithFallback(buildWeeklyReview(weeklyStats(appState.selectedDate)), 'Review copied', 'Pathfinder weekly review');
+}
+
+async function copyAiSummaryPacket() {
+  await copyTextWithFallback(buildAiReviewPacket(weeklyStats(appState.selectedDate)), 'AI packet copied', 'Pathfinder AI review packet');
+}
+
 function render() {
+  normalizeRuntimeState();
   injectMobilePwaStyles();
   applyCompactModeClass();
   $('#date-picker').value = appState.selectedDate;
@@ -1289,13 +1352,7 @@ function companionPacketText(day, stats) {
 
 async function copyCompanionPacket() {
   const text = companionPacketText(readDay(appState.selectedDate), weeklyStats(appState.selectedDate));
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast('Companion packet copied');
-  } catch {
-    console.log('Pathfinder companion packet:', text);
-    showToast('Clipboard blocked; packet printed to console');
-  }
+  await copyTextWithFallback(text, 'Companion packet copied', 'Pathfinder companion packet');
 }
 
 function renderToday() {
@@ -2698,13 +2755,7 @@ function storageDebugPacket() {
 
 async function copyStorageDebugInfo() {
   const text = JSON.stringify(storageDebugPacket(), null, 2);
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast('Debug info copied');
-  } catch {
-    console.log('Pathfinder storage debug info:', text);
-    showToast('Clipboard blocked; debug info printed to console');
-  }
+  await copyTextWithFallback(text, 'Debug info copied', 'Pathfinder storage debug info');
 }
 
 function runSaveTest() {
@@ -2833,7 +2884,7 @@ function mobileTipsCardHtml() {
 function updateReadyCardHtml() {
   return `<div class="card">
     <h3>Update habit</h3>
-    <p>After an update, open the versioned link, check Settings, then run the save test before using the app normally.</p>
+    <p>After an update, open the versioned link, confirm this screen shows the new version, then run the save test before using the app normally.</p>
     <p class="note">Current release: ${escapeHtml(window.__PATHFINDER_RELEASE__?.release || APP_VERSION)} · cache ${escapeHtml(window.__PATHFINDER_RELEASE__?.serviceWorkerCache || 'unknown')}</p>
   </div>`;
 }
@@ -2883,10 +2934,11 @@ function renderSettings() {
         ${updateSafetyCardHtml()}
         ${mobileTipsCardHtml()}
         ${updateReadyCardHtml()}
+        ${releaseReadinessCardHtml()}
         ${storageDebugCardHtml()}
         <div class="card">
           <h3>Storage status</h3>
-          <p>Saved on this device/browser. Cloud sync starts in 0.9.</p>
+          <p>Saved on this device/browser. Cloud sync is not enabled yet; export a backup before switching devices.</p>
           <div class="stack small-stack">
             <span class="badge ${storageLastError ? 'danger' : ''}">${storageLastError ? 'Storage warning' : 'Local save ready'}</span>
             <small>Loaded from: ${escapeHtml(storageLoadSource)}</small>
@@ -3551,7 +3603,7 @@ function greeting() {
 function wireEvents() {
   document.addEventListener('click', event => {
     const tabButton = event.target.closest('[data-tab]');
-    if (tabButton) { appState.activeTab = tabButton.dataset.tab; render(); return; }
+    if (tabButton) { if (APP_TABS.includes(tabButton.dataset.tab)) appState.activeTab = tabButton.dataset.tab; render(); return; }
     const action = event.target.closest('[data-action]');
     if (!action) return;
     handleAction(action);
@@ -3605,7 +3657,7 @@ function focusQuickCheckin() {
 function handleAction(action) {
   const day = getDay();
   switch (action.dataset.action) {
-    case 'jump': appState.activeTab = action.dataset.tabTarget; render(); break;
+    case 'jump': appState.activeTab = APP_TABS.includes(action.dataset.tabTarget) ? action.dataset.tabTarget : 'today'; render(); break;
     case 'focus-checkin': focusQuickCheckin(); break;
     case 'minimum-win':
     case 'log-exercise-status': {
@@ -3644,8 +3696,8 @@ function handleAction(action) {
     case 'toggle-routine-item': day.routine.completedIds[action.dataset.id] = !day.routine.completedIds[action.dataset.id]; saveState(); render(); break;
     case 'remove-routine-item': removeRoutineItem(action.dataset.block, action.dataset.id); break;
     case 'add-routine-item': addRoutineItem(); break;
-    case 'copy-review': navigator.clipboard?.writeText(buildWeeklyReview(weeklyStats(appState.selectedDate))); showToast('Review copied'); break;
-    case 'copy-ai-summary': navigator.clipboard?.writeText(buildAiReviewPacket(weeklyStats(appState.selectedDate))); showToast('AI packet copied'); break;
+    case 'copy-review': copyWeeklyReview(); break;
+    case 'copy-ai-summary': copyAiSummaryPacket(); break;
     case 'force-save': saveState(); render(); showToast('Saved on this device'); break;
     case 'run-save-test': runSaveTest(); break;
     case 'copy-storage-debug': copyStorageDebugInfo(); break;
