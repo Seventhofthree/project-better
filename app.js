@@ -1706,6 +1706,42 @@ function renderHistory() {
 }
 
 
+
+function safeSessionGet(key) {
+  try { return sessionStorage.getItem(key); }
+  catch (error) { storageLastError = error.message || String(error); return null; }
+}
+
+function parseStateCandidate(raw, source) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return { raw, parsed, source, updatedAt: Date.parse(parsed?.meta?.updatedAt || parsed?.meta?.createdAt || '') || 0 };
+  } catch {
+    return null;
+  }
+}
+
+function dayHasUserData(day) {
+  if (!day || typeof day !== 'object') return false;
+  const mealStatuses = Object.values(day.meals?.statuses || {});
+  const mealNotes = Object.values(day.meals?.notes || {});
+  const mealSwaps = Object.values(day.meals?.swaps || {});
+  const routineDone = Object.values(day.routine?.completedIds || {}).some(Boolean);
+  return (
+    mealStatuses.some(Boolean) ||
+    mealNotes.some(Boolean) ||
+    mealSwaps.some(Boolean) ||
+    (Array.isArray(day.meals?.customItems) && day.meals.customItems.length > 0) ||
+    Boolean(day.exercise?.status || day.exercise?.minutes || day.exercise?.notes || day.exercise?.pain || day.exercise?.soreness) ||
+    Boolean(day.checkin?.energy || day.checkin?.mood || day.checkin?.sleep || day.checkin?.stress || day.checkin?.hunger || day.checkin?.notes || Number(day.checkin?.water || 0) > 0) ||
+    Boolean(day.windDown?.completed || day.windDown?.calmMinutes || day.windDown?.note) ||
+    routineDone ||
+    Boolean(day.weight || day.dailyNote)
+  );
+}
+
 function storageCandidateSummary(label, raw) {
   const parsed = parseStateCandidate(raw, label);
   if (!parsed) {
