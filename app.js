@@ -686,6 +686,18 @@ function getDay(key = appState.selectedDate) {
   return appState.data.days[key];
 }
 
+function readDay(key = appState.selectedDate) {
+  // 0.8.9 source cleanup:
+  // Use this for charts, history, review, and projections when a screen needs to inspect a day
+  // without creating a saved blank record.
+  const existing = appState.data.days[key];
+  if (existing) {
+    migrateDay(existing);
+    return existing;
+  }
+  return createDay(key);
+}
+
 function getPlan() {
   return appState.data.plan || defaultMealPlan;
 }
@@ -736,7 +748,7 @@ function totalsForDay(day) {
 }
 
 
-function currentWeightForProjection(day = getDay()) {
+function currentWeightForProjection(day = readDay()) {
   return getLastWeight()?.value || Number(day.weight || 0) || Number(appState.data.settings.startingWeight || 0);
 }
 
@@ -1651,7 +1663,7 @@ function renderProgress() {
       </div>
       <div class="grid three">
         <div class="card"><h3>Progress narrative</h3><p>${escapeHtml(progressNarrative(stats, lastWeight))}</p></div>
-        ${projectionCardHtml(getDay(), stats)}
+        ${projectionCardHtml(readDay(appState.selectedDate), stats)}
         <div class="card"><h3>Minimum wins</h3><p>You logged ${stats.minimumWins} minimum win(s), ${stats.fullWorkouts} full workout(s), and ${stats.recoveryDays} recovery day(s) in the last 7 days.</p></div>
       </div>
     </section>`;
@@ -1944,7 +1956,7 @@ function weekKeysEnding(endKey) {
 function weeklyStats(endKey) {
   const start = shiftDate(endKey, -6);
   const keys = weekKeysEnding(endKey);
-  const days = keys.map(key => ({ key, day: getDay(key) }));
+  const days = keys.map(key => ({ key, day: readDay(key) }));
   const workoutsDone = days.filter(({ day }) => ['full','minimum','recovery'].includes(day.exercise.status)).length;
   const minimumWins = days.filter(({ day }) => day.exercise.status === 'minimum').length;
   const fullWorkouts = days.filter(({ day }) => day.exercise.status === 'full').length;
@@ -2109,7 +2121,7 @@ function buildAiReviewPacket(stats) {
       avgLoggedProtein: stats.avgLoggedProtein,
       avgExerciseCalories: stats.avgExerciseCalories,
       totalExerciseCalories: stats.totalExerciseCalories,
-      tdeeEstimate: Math.round(tdeeEstimate(currentWeightForProjection(getDay(stats.end))).tdee || 0),
+      tdeeEstimate: Math.round(tdeeEstimate(currentWeightForProjection(readDay(stats.end))).tdee || 0),
       weightChange: stats.weightChange,
       mealBreakdown: stats.mealBreakdown
     },
@@ -2198,7 +2210,7 @@ function progressNarrative(stats, lastWeight) {
 }
 
 function forecastText(stats) {
-  const day = getDay(stats.end);
+  const day = readDay(stats.end);
   const projection = atPaceProjection(day, stats);
   const burn = projection.burn || dailyBurnEstimate(day, stats);
   if (!projection.usedCalories) return 'Add food logs, weight, and TDEE inputs in Settings to enable the bodyweight expectation helper.';
@@ -2231,7 +2243,7 @@ function currentStreak(endKey) {
 
 function historyRows(count = 30) {
   const keys = Array.from({ length: count }, (_, index) => shiftDate(appState.selectedDate, -index)).reverse();
-  return keys.map(key => ({ key, day: getDay(key) }));
+  return keys.map(key => ({ key, day: readDay(key) }));
 }
 
 function historyDayCard({ key, day }) {
