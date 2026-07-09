@@ -1,12 +1,13 @@
-/* Pathfinder 0.8.8.4
+/* Pathfinder 0.8.8.5
    Local-first daily companion app. No account, no server, no dependencies.
-   0.8.8.4 is a no-bootstrap save repair: app.js loads directly and localStorage is the save path.
-   IndexedDB mirror/hydration is temporarily disabled to stop stale data from overwriting fresh logs.
+   0.8.8.5 is a storage fallback repair: localStorage, sessionStorage, and safe IndexedDB fallback all save.
+   IndexedDB restore is guarded so stale data cannot overwrite fresher local/session data.
 */
 
-const APP_VERSION = '0.8.8.4';
+const APP_VERSION = '0.8.8.5';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
+const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
 const IDB_DB_NAME = 'pathfinder-local-state';
 const IDB_STORE_NAME = 'state';
 const IDB_STATE_KEY = 'main';
@@ -432,17 +433,24 @@ function defaultState() {
 
 function loadState() {
   try {
-    let raw = safeLocalGet(STORAGE_KEY);
-    if (raw) storageLoadSource = 'localStorage';
-    if (!raw) {
-      for (const key of LEGACY_KEYS) {
-        raw = safeLocalGet(key);
-        if (raw) { storageLoadSource = key === STORAGE_BACKUP_KEY ? 'localStorage backup' : 'legacy localStorage'; break; }
-      }
+    const candidates = [
+      parseStateCandidate(safeLocalGet(STORAGE_KEY), 'localStorage'),
+      parseStateCandidate(safeLocalGet(STORAGE_BACKUP_KEY), 'localStorage backup'),
+      parseStateCandidate(safeSessionGet(SESSION_STORAGE_KEY), 'sessionStorage')
+    ].filter(Boolean);
+
+    for (const key of LEGACY_KEYS) {
+      candidates.push(parseStateCandidate(safeLocalGet(key), key === STORAGE_BACKUP_KEY ? 'localStorage backup' : 'legacy localStorage'));
     }
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    const migrated = mergeDefaults(defaultState(), parsed);
+
+    const best = chooseStoredStateCandidate(candidates);
+    if (!best) {
+      storageLoadSource = 'default';
+      return defaultState();
+    }
+
+    storageLoadSource = best.source;
+    const migrated = mergeDefaults(defaultState(), best.parsed);
     migrated.version = APP_VERSION;
     migrateState(migrated);
     return migrated;
@@ -500,27 +508,71 @@ function safeLocalGet(key) {
   catch (error) { storageLastError = error.message || String(error); return null; }
 }
 
+function safeSessionGet(key) {
+  try { return sessionStorage.getItem(key); }
+  catch (error) { storageLastError = error.message || String(error); return null; }
+}
+
+function parseStateCandidate(raw, source) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return { raw, parsed, source, updatedAt: candidateDateValue(parsed), hasUserData: stateHasUserData(parsed) };
+  } catch {
+    return null;
+  }
+}
+
+function candidateDateValue(state) {
+  return Date.parse(state?.meta?.updatedAt || state?.meta?.createdAt || '') || 0;
+}
+
+function chooseStoredStateCandidate(candidates) {
+  const valid = candidates.filter(Boolean);
+  if (!valid.length) return null;
+
+  valid.sort((a, b) => {
+    if (a.hasUserData !== b.hasUserData) return a.hasUserData ? -1 : 1;
+    return b.updatedAt - a.updatedAt;
+  });
+
+  return valid[0];
+}
+
 function saveState() {
   appState.data.version = APP_VERSION;
   appState.data.meta = appState.data.meta || {};
   appState.data.meta.updatedAt = new Date().toISOString();
   const payload = JSON.stringify(appState.data);
+  const errors = [];
+  let syncSaved = false;
+
   try {
     localStorage.setItem(STORAGE_KEY, payload);
     localStorage.setItem(STORAGE_BACKUP_KEY, payload);
     const verifyPrimary = localStorage.getItem(STORAGE_KEY);
-    if (verifyPrimary !== payload) {
-      throw new Error('localStorage verification failed after save');
-    }
-    storageLastError = '';
+    if (verifyPrimary !== payload) throw new Error('localStorage verification failed after save');
+    syncSaved = true;
   } catch (error) {
-    storageLastError = error.message || String(error);
+    errors.push(`localStorage: ${error.message || error}`);
     console.warn('Unable to save Pathfinder state to localStorage:', error);
-    showToast?.('Storage warning: export a backup');
   }
-  // 0.8.8.4 no-bootstrap save repair:
-  // IndexedDB mirror saving is temporarily disabled. localStorage primary + backup are the save path.
-  // queueIndexedDbSave(payload);
+
+  try {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, payload);
+    const verifySession = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (verifySession !== payload) throw new Error('sessionStorage verification failed after save');
+    syncSaved = true;
+  } catch (error) {
+    errors.push(`sessionStorage: ${error.message || error}`);
+    console.warn('Unable to save Pathfinder state to sessionStorage:', error);
+  }
+
+  queueIndexedDbSave(payload);
+
+  storageLastError = errors.join(' | ');
+  if (!syncSaved) showToast?.('Storage warning: export a backup');
 }
 
 function queueIndexedDbSave(payload) {
@@ -568,12 +620,32 @@ async function loadPayloadFromIndexedDb() {
   return record?.payload || null;
 }
 
+function dayHasUserData(day) {
+  if (!day || typeof day !== 'object') return false;
+  const mealStatuses = Object.values(day.meals?.statuses || {});
+  const mealNotes = Object.values(day.meals?.notes || {});
+  const mealSwaps = Object.values(day.meals?.swaps || {});
+  const routineDone = Object.values(day.routine?.completedIds || {}).some(Boolean);
+  return (
+    mealStatuses.some(Boolean) ||
+    mealNotes.some(Boolean) ||
+    mealSwaps.some(Boolean) ||
+    (Array.isArray(day.meals?.customItems) && day.meals.customItems.length > 0) ||
+    Boolean(day.exercise?.status || day.exercise?.minutes || day.exercise?.notes || day.exercise?.pain || day.exercise?.soreness) ||
+    Boolean(day.checkin?.energy || day.checkin?.mood || day.checkin?.sleep || day.checkin?.stress || day.checkin?.hunger || day.checkin?.notes || Number(day.checkin?.water || 0) > 0) ||
+    Boolean(day.windDown?.completed || day.windDown?.calmMinutes || day.windDown?.note) ||
+    routineDone ||
+    Boolean(day.weight || day.dailyNote)
+  );
+}
+
 function stateHasUserData(state) {
   if (!state) return false;
-  if (state.meta?.updatedAt) return true;
-  if (state.days && Object.keys(state.days).length) return true;
+  if (Object.values(state.days || {}).some(dayHasUserData)) return true;
   if (state.foods && state.foods.length !== defaultFoods.length) return true;
   if (state.savedMeals && state.savedMeals.length !== defaultSavedMeals.length) return true;
+  if (state.swaps && state.swaps.length !== defaultSwaps.length) return true;
+  if (state.workouts && state.workouts.length !== workouts.length) return true;
   return false;
 }
 
@@ -581,15 +653,21 @@ async function hydrateFromIndexedDb() {
   try {
     const payload = await loadPayloadFromIndexedDb();
     if (!payload) return;
+
     const parsed = JSON.parse(payload);
     const migrated = mergeDefaults(defaultState(), parsed);
     migrated.version = APP_VERSION;
     migrateState(migrated);
-    const currentUpdated = Date.parse(appState.data.meta?.updatedAt || '') || 0;
-    const idbUpdated = Date.parse(migrated.meta?.updatedAt || '') || 0;
-    if (storageLoadSource === 'default' || idbUpdated > currentUpdated || (!stateHasUserData(appState.data) && stateHasUserData(migrated))) {
+
+    const currentHasData = stateHasUserData(appState.data);
+    const idbHasData = stateHasUserData(migrated);
+
+    // 0.8.8.5 safety rule:
+    // IndexedDB is fallback only. It may restore only when the current loaded state has no meaningful user data.
+    // It must not overwrite localStorage/sessionStorage data that already has user logs.
+    if (!currentHasData && idbHasData) {
       appState.data = migrated;
-      storageLoadSource = 'IndexedDB mirror';
+      storageLoadSource = 'IndexedDB fallback';
       saveState();
       render();
       showToast('Saved Pathfinder data restored');
@@ -2670,8 +2748,6 @@ registerServiceWorker();
 requestPersistentStorage();
 // 0.8.8.4 no-bootstrap save repair:
 // Disabled because stale IndexedDB could overwrite fresh localStorage logs after refresh.
-// 0.8.8.4 no-bootstrap save repair:
-// Disabled because stale IndexedDB could overwrite fresh localStorage logs after refresh.
-// hydrateFromIndexedDb();
+hydrateFromIndexedDb();
 window.addEventListener('pagehide', flushStateOnPageLeave);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushStateOnPageLeave(); });
