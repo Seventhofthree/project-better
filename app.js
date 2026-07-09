@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.2
+/* Pathfinder 0.9.3
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.2 is an Exercise/Routine Polish release built from the verified 0.9.1 source.
-   Adds clearer workout guidance and routine next-step summaries without changing persistence.
+   0.9.3 is a Progress Trend Polish release built from the verified 0.9.2 source.
+   Adds clearer trend language, scale context, and progress guidance without changing persistence.
 */
 
-const APP_VERSION = '0.9.2';
+const APP_VERSION = '0.9.3';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -1875,6 +1875,144 @@ function renderAssistant() {
     </section>`;
 }
 
+
+function formatSignedNumber(value, decimals = 1, suffix = '') {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  const fixed = Number(value).toFixed(decimals);
+  return `${Number(value) > 0 ? '+' : ''}${fixed}${suffix}`;
+}
+
+function weightTrendDetail(stats) {
+  const change = stats.weightChange;
+  const weights = stats.weights || [];
+  if (!weights.length) {
+    return {
+      label: 'No weigh-ins yet',
+      badgeClass: 'neutral',
+      changeText: '—',
+      meaning: 'Log weight a few times this week before judging progress.',
+      action: 'Add a weigh-in on Today when convenient.'
+    };
+  }
+  if (weights.length === 1 || change === null) {
+    return {
+      label: 'One weigh-in',
+      badgeClass: 'blue',
+      changeText: '—',
+      meaning: 'One weigh-in is useful, but it is not a trend.',
+      action: 'Get 2–3 more weigh-ins before making conclusions.'
+    };
+  }
+  if (change <= -1) {
+    return {
+      label: 'Trending down',
+      badgeClass: '',
+      changeText: formatSignedNumber(change, 1, ' lb'),
+      meaning: 'The 7-day direction is down. Keep the plan steady unless energy, sleep, or hunger are getting rough.',
+      action: 'Repeat the boring version: log food, hit minimum movement, and keep water steady.'
+    };
+  }
+  if (change >= 1) {
+    return {
+      label: 'Trending up',
+      badgeClass: 'warn',
+      changeText: formatSignedNumber(change, 1, ' lb'),
+      meaning: 'The 7-day direction is up, but a one-week jump can be water, sodium, soreness, sleep, timing, or logging gaps.',
+      action: 'Do a 3-day tighten-up: log meals honestly, drink water earlier, and do minimum movement.'
+    };
+  }
+  return {
+    label: 'Mostly steady',
+    badgeClass: 'blue',
+    changeText: formatSignedNumber(change, 1, ' lb'),
+    meaning: 'The scale is mostly steady this week. This is still useful feedback.',
+    action: 'Focus on consistency before changing calories.'
+  };
+}
+
+function progressComparison(stats) {
+  const previous = weeklyStats(shiftDate(stats.start, -1));
+  return {
+    scoreDelta: stats.score - previous.score,
+    mealDelta: stats.mealLogDays - previous.mealLogDays,
+    workoutDelta: stats.workouts - previous.workouts,
+    calorieDelta: stats.avgLoggedCalories && previous.avgLoggedCalories ? stats.avgLoggedCalories - previous.avgLoggedCalories : null
+  };
+}
+
+function progressDashboardHtml(stats, lastWeight) {
+  const trend = weightTrendDetail(stats);
+  const comparison = progressComparison(stats);
+  return `<div class="card highlight">
+    <div class="card-title">
+      <div>
+        <h3>Progress direction</h3>
+        <p>Use the trend and the behavior data together. The scale alone is too noisy.</p>
+      </div>
+      <span class="badge ${trend.badgeClass}">${escapeHtml(trend.label)}</span>
+    </div>
+    <div class="grid four">
+      <div class="metric"><span class="value">${lastWeight ? lastWeight.value.toFixed(1) : '—'}</span><span class="label">latest weight</span><small>${lastWeight ? formatDate(lastWeight.key, 'short') : 'log first weigh-in'}</small></div>
+      <div class="metric"><span class="value">${escapeHtml(trend.changeText)}</span><span class="label">7-day scale change</span><small>${(stats.weights || []).length} weigh-in${(stats.weights || []).length === 1 ? '' : 's'}</small></div>
+      <div class="metric"><span class="value">${formatSignedNumber(comparison.scoreDelta, 0, '%')}</span><span class="label">score vs prior week</span><small>routine direction</small></div>
+      <div class="metric"><span class="value">${formatSignedNumber(comparison.workoutDelta, 0, '')}</span><span class="label">movement days change</span><small>${stats.workouts}/7 this week</small></div>
+    </div>
+    <p class="note"><strong>What this means:</strong> ${escapeHtml(trend.meaning)}</p>
+    <p class="note"><strong>Next move:</strong> ${escapeHtml(trend.action)}</p>
+  </div>`;
+}
+
+function scaleContextText(stats) {
+  const issues = [];
+  if (stats.weightChange !== null && stats.weightChange >= 1) issues.push('the scale is up this week');
+  if (stats.waterDays < 4) issues.push('water goal was hit fewer than 4 days');
+  if (stats.workouts >= 3) issues.push('workouts can temporarily increase soreness and water retention');
+  if (stats.mealLogDays < 5) issues.push('food logs are incomplete enough to blur the projection');
+  if (!issues.length) return 'Nothing here screams panic. Keep watching the 2–3 week direction instead of reacting to one weigh-in.';
+  return `Possible scale noise: ${issues.join(', ')}. That does not mean progress failed; it means the next few days should be boring and consistent.`;
+}
+
+function progressMeaningCardHtml(stats, lastWeight) {
+  const trend = weightTrendDetail(stats);
+  const quality = stats.mealLogDays >= 5 && stats.weights.length >= 2 ? 'good' : stats.mealLogDays >= 3 || stats.weights.length >= 2 ? 'partial' : 'thin';
+  const qualityText = quality === 'good'
+    ? 'There is enough data to use the trend as a useful direction check.'
+    : quality === 'partial'
+      ? 'There is some useful data, but missing logs can still make the story fuzzy.'
+      : 'The data is still thin. Build the record before judging the plan.';
+  return `<div class="card">
+    <h3>What this means</h3>
+    <p>${escapeHtml(progressNarrative(stats, lastWeight))}</p>
+    <p class="note"><strong>Data quality:</strong> ${escapeHtml(qualityText)}</p>
+    <p class="note"><strong>Practical move:</strong> ${escapeHtml(trend.action)}</p>
+  </div>`;
+}
+
+function scaleContextCardHtml(stats) {
+  return `<div class="card warning">
+    <h3>Scale context</h3>
+    <p>${escapeHtml(scaleContextText(stats))}</p>
+    <p class="note">Daily weight can swing from water, sodium, soreness, sleep, stress, bathroom timing, and carb intake. Pathfinder should adjust from patterns, not panic.</p>
+  </div>`;
+}
+
+function minimumWinsProgressCardHtml(stats) {
+  const movementText = stats.workouts >= 4
+    ? 'Movement showed up well this week.'
+    : stats.workouts >= 2
+      ? 'Movement is present, but the minimum-win button should stay easy to reach.'
+      : 'Movement needs to be smaller before it can become automatic.';
+  return `<div class="card">
+    <h3>Behavior trend</h3>
+    <p>${escapeHtml(movementText)}</p>
+    <div class="grid two">
+      <div class="metric"><span class="value">${stats.minimumWins}</span><span class="label">minimum wins</span><small>habit protected</small></div>
+      <div class="metric"><span class="value">${stats.fullWorkouts}</span><span class="label">full workouts</span><small>do not force these</small></div>
+    </div>
+    <p class="note">${stats.recoveryDays} recovery day(s). Recovery still counts when it protects consistency.</p>
+  </div>`;
+}
+
 function renderProgress() {
   setTitle('Progress');
   const stats = weeklyStats(appState.selectedDate);
@@ -1892,20 +2030,32 @@ function renderProgress() {
         <div class="metric"><span class="value">${remaining > 0 ? remaining.toFixed(1) : '—'}</span><span class="label">to goal</span><small>goal ${goalWeight || '—'} lb</small></div>
         <div class="metric"><span class="value">${currentStreak(appState.selectedDate)}</span><span class="label">logging streak</span><small>days with any score</small></div>
       </div>
+
+      ${progressDashboardHtml(stats, lastWeight)}
+
       <div class="grid two">
-        <div class="card chart-card"><div class="card-title"><div><h3>Weight trend</h3><p>Includes 7-day average when enough data exists.</p></div></div><canvas id="weight-chart" width="960" height="360"></canvas></div>
+        <div class="card chart-card"><div class="card-title"><div><h3>Weight trend</h3><p>Includes recent weights and a 7-day average when enough data exists.</p></div></div><canvas id="weight-chart" width="960" height="360"></canvas></div>
         <div class="card chart-card"><div class="card-title"><div><h3>Non-scale wins</h3><p>Meals, movement, wind-down, and routine completion.</p></div></div><canvas id="habit-chart" width="960" height="360"></canvas></div>
       </div>
+
       <div class="grid three">
-        <div class="card"><h3>Progress narrative</h3><p>${escapeHtml(progressNarrative(stats, lastWeight))}</p></div>
+        ${progressMeaningCardHtml(stats, lastWeight)}
         ${projectionCardHtml(readDay(appState.selectedDate), stats)}
-        <div class="card"><h3>Minimum wins</h3><p>You logged ${stats.minimumWins} minimum win(s), ${stats.fullWorkouts} full workout(s), and ${stats.recoveryDays} recovery day(s) in the last 7 days.</p></div>
+        ${scaleContextCardHtml(stats)}
+      </div>
+
+      <div class="grid two">
+        ${minimumWinsProgressCardHtml(stats)}
+        <div class="card">
+          <h3>Trend rule</h3>
+          <p>Do not change the plan from one noisy weigh-in. Look for the 2–3 week direction, then adjust the easiest lever first.</p>
+          <p class="note">Easiest levers: complete meal logging, minimum movement, water earlier in the day, and sleep/wind-down consistency.</p>
+        </div>
       </div>
     </section>`;
   drawWeightChart();
   drawHabitChart(stats);
 }
-
 function renderReview() {
   setTitle('Review');
   const stats = weeklyStats(appState.selectedDate);
@@ -2479,8 +2629,8 @@ function atPaceProjection(day, stats) {
   const fiveWeekHigh = projected + uncertainty;
   const exerciseText = burn.exerciseAdd ? ` plus about ${Math.round(burn.exerciseAdd)} kcal/day from logged exercise` : ' with no meaningful logged exercise bonus yet';
   const summary = dailyGap <= 0
-    ? `Based on your TDEE estimate${exerciseText}, logged calories are near or above your estimated burn. Weight loss would likely be slow or paused over 5 weeks.`
-    : `Based on your TDEE estimate${exerciseText}, a rough 5-week range is ${fiveWeekLow.toFixed(1)}–${fiveWeekHigh.toFixed(1)} lb.`;
+    ? `Paper math says logged calories are near or above estimated burn${exerciseText}. That usually means slow loss, a pause, or a need for tighter logging before changing the plan.`
+    : `Paper math points toward a rough 5-week range of ${fiveWeekLow.toFixed(1)}–${fiveWeekHigh.toFixed(1)} lb${exerciseText}. Treat this as direction, not a promise.`;
   const confidenceReason = confidence === 'higher' ? 'most meal days are complete' : confidence === 'medium' ? 'some useful food data exists, but blanks still matter' : 'too few complete food logs for a confident projection';
   return { summary, fiveWeekLow, fiveWeekHigh, weeklyLoss: Math.max(0, weeklyLoss), confidence, confidenceReason, usedCalories, dailyGap, loggedDays, completeDays, burn };
 }
