@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.4
+/* Pathfinder 0.9.5
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.4 is an Evening Review / Weekly Review release built from the verified 0.9.3 source.
-   Adds clearer daily recap and weekly coaching cards without changing persistence.
+   0.9.5 is a Saved Food / Calorie Counter Polish release built from the verified 0.9.4 source.
+   Makes repeat foods, estimates, and serving multipliers easier without changing persistence.
 */
 
-const APP_VERSION = '0.9.4';
+const APP_VERSION = '0.9.5';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -1246,6 +1246,132 @@ function mealDashboardGuidance(day, totals) {
   return 'Food logging looks complete for today.';
 }
 
+
+function quickFoodEstimates() {
+  return [
+    { name: 'Small snack estimate', meal: 'snack', calories: 150, protein: 5, fiber: 2, note: 'small snack' },
+    { name: 'Protein snack estimate', meal: 'snack', calories: 250, protein: 20, fiber: 2, note: 'protein backup' },
+    { name: 'Fast food sandwich estimate', meal: 'lunch', calories: 550, protein: 25, fiber: 3, note: 'real-world lunch' },
+    { name: 'Restaurant meal estimate', meal: 'dinner', calories: 850, protein: 35, fiber: 5, note: 'safer high estimate' }
+  ];
+}
+
+function quickFoodEstimateButtonsHtml(mode = 'fill') {
+  const action = mode === 'log' ? 'log-food-estimate' : 'fill-food-estimate';
+  const label = mode === 'log' ? 'Log' : 'Fill';
+  return `<div class="toggle-row tight">${quickFoodEstimates().map(item => `<button class="ghost small" data-action="${action}" data-name="${escapeHtml(item.name)}" data-meal="${escapeHtml(item.meal)}" data-calories="${item.calories}" data-protein="${item.protein}" data-fiber="${item.fiber}">${label}: ${escapeHtml(item.note)}</button>`).join('')}</div>`;
+}
+
+function customFoodFormHtml() {
+  return `<div class="card">
+    <h3>Ate something else</h3>
+    <p>Log a real-world swap instead of leaving the day blank. Estimates are better than missing data.</p>
+    <div class="input-row two">
+      <div class="input-group"><label>Name</label><input id="custom-food-name" type="text" placeholder="Example: Subway sandwich" /></div>
+      <div class="input-group"><label>Meal</label><select id="custom-food-meal"><option value="snack">Snack/other</option>${MEAL_KEYS.map(key => `<option value="${key}">${capitalize(key)}</option>`).join('')}</select></div>
+      <div class="input-group"><label>Servings / multiplier</label><input id="custom-food-servings" type="number" min="0.1" step="0.25" value="1" /></div>
+      <div class="input-group"><label>Calories per serving</label><input id="custom-food-calories" type="number" step="1" placeholder="0" /></div>
+      <div class="input-group"><label>Protein per serving</label><input id="custom-food-protein" type="number" step="1" placeholder="0" /></div>
+      <div class="input-group"><label>Fiber per serving</label><input id="custom-food-fiber" type="number" step="1" placeholder="0" /></div>
+      <div class="input-group"><label>Save?</label><select id="custom-food-save"><option value="no">Log only</option><option value="yes">Save as repeat food</option></select></div>
+    </div>
+    <p class="note">Use the quick estimates when you do not know exact calories. The goal is a useful weekly picture, not perfection.</p>
+    ${quickFoodEstimateButtonsHtml('fill')}
+    <div class="toggle-row"><button class="primary" data-action="add-custom-food">Add food log</button></div>
+  </div>`;
+}
+
+function logFoodItemToday(source, options = {}) {
+  if (!source) return false;
+  const servings = Math.max(0.1, Number(options.servings || 1));
+  const meal = options.meal || source.meal || 'snack';
+  const item = {
+    id: `${options.prefix || 'food'}-${slugify(source.name || 'food')}-${Date.now()}`,
+    name: `${source.name || 'Food'}${servings !== 1 ? ` × ${servings}` : ''}`,
+    meal,
+    calories: Math.round(Number(source.calories || 0) * servings),
+    protein: Number((Number(source.protein || 0) * servings).toFixed(1)),
+    fiber: Number((Number(source.fiber || 0) * servings).toFixed(1)),
+    createdAt: new Date().toISOString(),
+    source: source.source || options.source || 'Food log'
+  };
+  const day = getDay();
+  day.meals.customItems.push(item);
+  if (MEAL_KEYS.includes(meal) && !day.meals.statuses[meal]) day.meals.statuses[meal] = 'swapped';
+  return true;
+}
+
+function recentLoggedFoods(limit = 8) {
+  const seen = new Map();
+  for (let i = 0; i < 30; i += 1) {
+    const key = shiftDate(appState.selectedDate, -i);
+    const day = readDay(key);
+    (day.meals.customItems || []).forEach(item => {
+      if (!item?.name) return;
+      const normalizedName = String(item.name).replace(/\s×\s[\d.]+$/, '').trim();
+      const mapKey = `${normalizedName}|${Math.round(Number(item.calories || 0))}|${Number(item.protein || 0)}|${Number(item.fiber || 0)}`;
+      if (!seen.has(mapKey)) {
+        seen.set(mapKey, {
+          name: normalizedName,
+          meal: item.meal || 'snack',
+          calories: Number(item.calories || 0),
+          protein: Number(item.protein || 0),
+          fiber: Number(item.fiber || 0),
+          lastUsed: key
+        });
+      }
+    });
+  }
+  return Array.from(seen.values()).slice(0, limit);
+}
+
+function recentFoodsHtml() {
+  const foods = recentLoggedFoods(6);
+  if (!foods.length) return '';
+  return `<div class="card">
+    <div class="card-title"><div><h3>Recent repeat foods</h3><p>One-tap repeats from recent custom food logs.</p></div><span class="badge neutral">${foods.length} shown</span></div>
+    <div class="library-grid">${foods.map(item => `<div class="library-item">
+      <strong>${escapeHtml(item.name)}</strong>
+      <small>${Math.round(item.calories)} kcal · ${item.protein || 0}g protein · ${item.fiber || 0}g fiber · last ${formatDate(item.lastUsed, 'short')}</small>
+      <div class="toggle-row tight"><button class="ghost small" data-action="repeat-food" data-name="${escapeHtml(item.name)}" data-meal="${escapeHtml(item.meal)}" data-calories="${item.calories}" data-protein="${item.protein}" data-fiber="${item.fiber}">Repeat today</button></div>
+    </div>`).join('')}</div>
+  </div>`;
+}
+
+function foodCounterHelpCardHtml() {
+  const day = readDay(appState.selectedDate);
+  const totals = totalsForDay(day);
+  const calorieGoal = Number(appState.data.settings.calorieGoal || totals.plannedCalories || 0);
+  const room = calorieGoal - totals.loggedCalories;
+  return `<div class="card">
+    <h3>Food counter helper</h3>
+    <p>Use this when the planned meal did not happen. Pick an estimate, repeat a saved food, or search the food database.</p>
+    <div class="grid two">
+      <div class="metric"><span class="value">${signedRemainingText(room)}</span><span class="label">calorie room</span><small>${Math.round(totals.loggedCalories)} logged</small></div>
+      <div class="metric"><span class="value">${MEAL_KEYS.filter(key => !mealLogged(day, key)).length}</span><span class="label">open meals</span><small>close blanks with estimates</small></div>
+    </div>
+    <p class="note">Rule: rough and logged beats blank and forgotten.</p>
+  </div>`;
+}
+
+function selectedSavedFoodLoggerHtml() {
+  if (!appState.data.foods.length) {
+    return `<div class="card">
+      <h3>Saved food quick log</h3>
+      <p class="note">Save foods below first, then this becomes a fast repeat logger.</p>
+    </div>`;
+  }
+  return `<div class="card">
+    <div class="card-title"><div><h3>Saved food quick log</h3><p>Choose a saved food, meal slot, and serving multiplier.</p></div><span class="badge neutral">${appState.data.foods.length} foods</span></div>
+    <div class="input-row three">
+      <div class="input-group"><label>Saved food</label><select id="saved-food-select">${appState.data.foods.map(food => `<option value="${escapeHtml(food.id)}">${escapeHtml(food.name)} · ${escapeHtml(food.serving || 'serving')}</option>`).join('')}</select></div>
+      <div class="input-group"><label>Meal</label><select id="saved-food-meal"><option value="snack">Snack/other</option>${MEAL_KEYS.map(key => `<option value="${key}">${capitalize(key)}</option>`).join('')}</select></div>
+      <div class="input-group"><label>Servings</label><input id="saved-food-servings" type="number" min="0.1" step="0.25" value="1" /></div>
+    </div>
+    <div class="toggle-row"><button class="primary" data-action="quick-log-selected-food">Log selected food</button></div>
+  </div>`;
+}
+
 function renderMeals() {
   setTitle('Meals');
   const day = getDay();
@@ -1278,19 +1404,8 @@ function renderMeals() {
       </div>
 
       <aside class="grid">
-        <div class="card">
-          <h3>Ate something else</h3>
-          <p>Log a real-world swap instead of leaving the day blank.</p>
-          <div class="input-row two">
-            <div class="input-group"><label>Name</label><input id="custom-food-name" type="text" placeholder="Example: Subway sandwich" /></div>
-            <div class="input-group"><label>Meal</label><select id="custom-food-meal"><option value="snack">Snack/other</option>${MEAL_KEYS.map(key => `<option value="${key}">${capitalize(key)}</option>`).join('')}</select></div>
-            <div class="input-group"><label>Calories</label><input id="custom-food-calories" type="number" step="1" placeholder="0" /></div>
-            <div class="input-group"><label>Protein</label><input id="custom-food-protein" type="number" step="1" placeholder="0" /></div>
-            <div class="input-group"><label>Fiber</label><input id="custom-food-fiber" type="number" step="1" placeholder="0" /></div>
-            <div class="input-group"><label>Save?</label><select id="custom-food-save"><option value="no">Log only</option><option value="yes">Save as meal</option></select></div>
-          </div>
-          <div class="toggle-row"><button class="primary" data-action="add-custom-food">Add food log</button></div>
-        </div>
+        ${customFoodFormHtml()}
+        ${recentFoodsHtml()}
         ${projectionCardHtml(day, weeklyStats(appState.selectedDate))}
         <div class="card">
           <h3>Saved meal quick add</h3>
@@ -1399,6 +1514,9 @@ function renderFood() {
             <div class="input-group"><label>Calorie range</label><input data-plan-field="calorieRange" value="${escapeHtml(plan.calorieRange)}" /></div>
           </div>
         </div>
+        ${foodCounterHelpCardHtml()}
+        ${selectedSavedFoodLoggerHtml()}
+        ${recentFoodsHtml()}
         ${foodDatabaseSearchCard()}
         <div class="grid three">
           ${MEAL_KEYS.map(key => planMealEditCard(key, plan.meals[key])).join('')}
@@ -2521,7 +2639,16 @@ function customItemsHtml(day) {
 }
 
 function foodLibraryCard(food) {
-  return `<div class="library-item"><strong>${escapeHtml(food.name)}</strong><small>${escapeHtml(food.serving || 'serving')} · ${food.calories || 0} kcal · ${food.protein || 0}g protein</small><span class="badge neutral">${escapeHtml(food.category || 'food')}</span><button class="ghost small" data-action="quick-add-food" data-id="${escapeHtml(food.id)}">Add today</button></div>`;
+  return `<div class="library-item">
+    <strong>${escapeHtml(food.name)}</strong>
+    <small>${escapeHtml(food.serving || 'serving')} · ${food.calories || 0} kcal · ${food.protein || 0}g protein · ${food.fiber || 0}g fiber</small>
+    <span class="badge neutral">${escapeHtml(food.category || 'food')}</span>
+    <div class="toggle-row tight">
+      <button class="ghost small" data-action="quick-add-food" data-id="${escapeHtml(food.id)}" data-servings="0.5">½x</button>
+      <button class="secondary small" data-action="quick-add-food" data-id="${escapeHtml(food.id)}" data-servings="1">Add</button>
+      <button class="ghost small" data-action="quick-add-food" data-id="${escapeHtml(food.id)}" data-servings="2">2x</button>
+    </div>
+  </div>`;
 }
 
 function swapCard(swap) {
@@ -3179,10 +3306,14 @@ function handleAction(action) {
     case 'meal-status': day.meals.statuses[action.dataset.meal] = action.dataset.status; saveState(); render(); break;
     case 'toggle': togglePath(action.dataset.path); break;
     case 'water': day.checkin.water = Math.max(0, Number(day.checkin.water || 0) + Number(action.dataset.delta || 0)); saveState(); render(); break;
+    case 'fill-food-estimate': fillCustomFoodEstimate(action); break;
+    case 'log-food-estimate': logFoodEstimate(action); break;
+    case 'repeat-food': logFoodEstimate(action); break;
+    case 'quick-log-selected-food': quickLogSelectedFood(); break;
     case 'add-custom-food': addCustomFood(); break;
     case 'remove-custom-food': day.meals.customItems.splice(Number(action.dataset.index), 1); saveState(); render(); break;
     case 'quick-add-saved-meal': quickAddSavedMeal(action.dataset.id); break;
-    case 'quick-add-food': quickAddFood(action.dataset.id); break;
+    case 'quick-add-food': quickAddFood(action.dataset.id, Number(action.dataset.servings || 1), action.dataset.meal || 'snack'); break;
     case 'add-db-food': addDatabaseFood(action.dataset.id, false); break;
     case 'save-db-food': addDatabaseFood(action.dataset.id, true); break;
     case 'apply-food-search': appState.data.settings.foodSearch = $('#food-search-input')?.value || ''; saveState(); render(); break;
@@ -3317,28 +3448,85 @@ function mapOpenFoodFactsProduct(product) {
   };
 }
 
+function fillCustomFoodEstimate(action) {
+  const fields = {
+    name: $('#custom-food-name'),
+    meal: $('#custom-food-meal'),
+    servings: $('#custom-food-servings'),
+    calories: $('#custom-food-calories'),
+    protein: $('#custom-food-protein'),
+    fiber: $('#custom-food-fiber')
+  };
+  if (!fields.name) return showToast('Open Meals to fill the food logger');
+  fields.name.value = action.dataset.name || '';
+  if (fields.meal) fields.meal.value = action.dataset.meal || 'snack';
+  if (fields.servings) fields.servings.value = '1';
+  if (fields.calories) fields.calories.value = action.dataset.calories || 0;
+  if (fields.protein) fields.protein.value = action.dataset.protein || 0;
+  if (fields.fiber) fields.fiber.value = action.dataset.fiber || 0;
+  showToast('Estimate filled. Edit if needed, then add food log.');
+}
+
+function logFoodEstimate(action) {
+  const source = {
+    name: action.dataset.name || 'Food estimate',
+    meal: action.dataset.meal || 'snack',
+    calories: Number(action.dataset.calories || 0),
+    protein: Number(action.dataset.protein || 0),
+    fiber: Number(action.dataset.fiber || 0),
+    source: 'Quick estimate'
+  };
+  logFoodItemToday(source, { prefix: 'estimate', meal: source.meal, source: 'Quick estimate' });
+  saveState(); render(); showToast('Food estimate logged');
+}
+
 function addCustomFood() {
   const name = $('#custom-food-name')?.value.trim();
   if (!name) return showToast('Add a food name');
-  const item = { id: `custom-${Date.now()}`, name, meal: $('#custom-food-meal').value, calories: Number($('#custom-food-calories').value || 0), protein: Number($('#custom-food-protein').value || 0), fiber: Number($('#custom-food-fiber').value || 0), createdAt: new Date().toISOString() };
-  const day = getDay(); day.meals.customItems.push(item);
-  if (MEAL_KEYS.includes(item.meal) && !day.meals.statuses[item.meal]) day.meals.statuses[item.meal] = 'swapped';
-  if ($('#custom-food-save').value === 'yes') appState.data.savedMeals.push({ ...item, notes: 'Saved from a custom food log.' });
+  const servings = Math.max(0.1, Number($('#custom-food-servings')?.value || 1));
+  const perServing = {
+    name,
+    meal: $('#custom-food-meal')?.value || 'snack',
+    calories: Number($('#custom-food-calories')?.value || 0),
+    protein: Number($('#custom-food-protein')?.value || 0),
+    fiber: Number($('#custom-food-fiber')?.value || 0),
+    source: 'Custom food'
+  };
+  logFoodItemToday(perServing, { servings, meal: perServing.meal, prefix: 'custom', source: 'Custom food' });
+  if ($('#custom-food-save')?.value === 'yes') {
+    const exists = appState.data.foods.some(food => food.name.toLowerCase() === name.toLowerCase());
+    if (!exists) appState.data.foods.push({
+      id: `${slugify(name)}-${Date.now()}`,
+      name,
+      serving: servings === 1 ? '1 serving' : `${servings} serving log`,
+      calories: Math.round(perServing.calories * servings),
+      protein: Number((perServing.protein * servings).toFixed(1)),
+      fiber: Number((perServing.fiber * servings).toFixed(1)),
+      category: 'Saved repeat food'
+    });
+  }
   saveState(); render(); showToast('Food logged');
 }
 
 function quickAddSavedMeal(id) {
   const meal = appState.data.savedMeals.find(item => item.id === id);
   if (!meal) return;
-  getDay().meals.customItems.push({ ...meal, id: `saved-${id}-${Date.now()}`, meal: 'other', createdAt: new Date().toISOString() });
+  logFoodItemToday(meal, { prefix: 'saved', meal: 'snack', source: 'Saved meal' });
   saveState(); render(); showToast('Saved meal added');
 }
 
-function quickAddFood(id) {
+function quickAddFood(id, servings = 1, meal = 'snack') {
   const food = appState.data.foods.find(item => item.id === id);
   if (!food) return;
-  getDay().meals.customItems.push({ id: `food-${id}-${Date.now()}`, name: food.name, meal: 'other', calories: Number(food.calories || 0), protein: Number(food.protein || 0), fiber: Number(food.fiber || 0), createdAt: new Date().toISOString() });
+  logFoodItemToday(food, { servings, meal, prefix: 'library', source: 'My foods' });
   saveState(); render(); showToast('Food added today');
+}
+
+function quickLogSelectedFood() {
+  const id = $('#saved-food-select')?.value;
+  const servings = Math.max(0.1, Number($('#saved-food-servings')?.value || 1));
+  const meal = $('#saved-food-meal')?.value || 'snack';
+  quickAddFood(id, servings, meal);
 }
 
 function addFoodLibrary() {
