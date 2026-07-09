@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.0.1
+/* Pathfinder 0.9.1
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.0.1 is a Settings hotfix built from the last known good 0.8.8.5 storage foundation.
-   Includes startup migration safety, read-only day cleanup, and update safety diagnostics.
+   0.9.1 is a Meal Dashboard Polish release built from the verified 0.9.0.1 source.
+   Adds clearer calorie/protein/fiber progress without changing persistence.
 */
 
-const APP_VERSION = '0.9.0.1';
+const APP_VERSION = '0.9.1';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -816,6 +816,11 @@ function loggedMealProtein(day) {
   return MEAL_KEYS.reduce((sum, key) => sum + (mealPlanned(day, key) ? Number(plan.meals[key]?.protein || 0) : 0), 0);
 }
 
+function loggedMealFiber(day) {
+  const plan = getPlan();
+  return MEAL_KEYS.reduce((sum, key) => sum + (mealPlanned(day, key) ? Number(plan.meals[key]?.fiber || 0) : 0), 0);
+}
+
 function customCalories(day) { return day.meals.customItems.reduce((sum, item) => sum + Number(item.calories || 0), 0); }
 function customProtein(day) { return day.meals.customItems.reduce((sum, item) => sum + Number(item.protein || 0), 0); }
 function customFiber(day) { return day.meals.customItems.reduce((sum, item) => sum + Number(item.fiber || 0), 0); }
@@ -825,16 +830,20 @@ function totalsForDay(day) {
   const plan = getPlan();
   const plannedCalories = Number(plan.baseCalories || MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.calories || 0), 0));
   const plannedProtein = Number(plan.baseMacros?.protein || MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.protein || 0), 0));
+  const plannedFiber = Number(plan.baseMacros?.fiber || MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.fiber || 0), 0));
   const loggedCalories = loggedMealCalories(day) + customCalories(day);
   const loggedProtein = loggedMealProtein(day) + customProtein(day);
+  const loggedFiber = loggedMealFiber(day) + customFiber(day);
   return {
     plannedCalories,
     plannedProtein,
+    plannedFiber,
     loggedCalories,
     loggedProtein,
+    loggedFiber,
     fat: Number(plan.baseMacros?.fat || 0),
     carbs: Number(plan.baseMacros?.carbs || 0),
-    fiber: Number(plan.baseMacros?.fiber || 0) + customFiber(day)
+    fiber: loggedFiber
   };
 }
 
@@ -1205,11 +1214,47 @@ function renderToday() {
     </section>`;
 }
 
+
+function signedRemainingText(value, unit = '') {
+  const amount = Math.round(Math.abs(Number(value || 0)));
+  if (Number(value || 0) >= 0) return `${amount}${unit} left`;
+  return `${amount}${unit} over`;
+}
+
+function mealDashboardGuidance(day, totals) {
+  const calorieGoal = Number(appState.data.settings.calorieGoal || totals.plannedCalories || 0);
+  const caloriesRemaining = calorieGoal - totals.loggedCalories;
+  const proteinRemaining = Math.max(0, Number(totals.plannedProtein || 0) - Number(totals.loggedProtein || 0));
+  const fiberRemaining = Math.max(0, Number(totals.plannedFiber || 0) - Number(totals.loggedFiber || 0));
+  const unloggedMeals = MEAL_KEYS.filter(key => !mealLogged(day, key)).length;
+
+  if (unloggedMeals === 3 && !day.meals.customItems.length) {
+    return 'Start by marking Meal 1, or log what you actually ate. Blank is less useful than an estimate.';
+  }
+  if (caloriesRemaining < -150) {
+    return 'You are over target today. Keep logging honestly; the weekly average matters more than one imperfect day.';
+  }
+  if (proteinRemaining > 20) {
+    return `Protein is still short by about ${Math.round(proteinRemaining)}g. A simple protein backup can help.`;
+  }
+  if (fiberRemaining > 8) {
+    return `Fiber is still short by about ${Math.round(fiberRemaining)}g. Lentils, beans, fruit, or vegetables help.`;
+  }
+  if (unloggedMeals > 0) {
+    return `${unloggedMeals} meal${unloggedMeals === 1 ? '' : 's'} still need a status. Mark Ate plan, Swapped, or Skipped.`;
+  }
+  return 'Food logging looks complete for today.';
+}
+
 function renderMeals() {
   setTitle('Meals');
   const day = getDay();
   const totals = totalsForDay(day);
   const plan = getPlan();
+  const calorieGoal = Number(appState.data.settings.calorieGoal || totals.plannedCalories || 0);
+  const caloriesRemaining = calorieGoal - totals.loggedCalories;
+  const proteinRemaining = Math.max(0, Number(totals.plannedProtein || 0) - Number(totals.loggedProtein || 0));
+  const fiberRemaining = Math.max(0, Number(totals.plannedFiber || 0) - Number(totals.loggedFiber || 0));
   $('#app').innerHTML = `
     <section class="grid sidebar">
       <div class="grid">
@@ -1221,11 +1266,13 @@ function renderMeals() {
             </div>
             <span class="badge">${Math.round(totals.loggedCalories).toLocaleString()} kcal logged</span>
           </div>
-          <div class="grid three">
-            <div class="metric"><span class="value">${Math.round(totals.loggedCalories)}</span><span class="label">logged calories</span><small>${appState.data.settings.calorieGoal} goal</small></div>
-            <div class="metric"><span class="value">${Math.round(totals.loggedProtein)}g</span><span class="label">logged protein</span><small>${Math.round(totals.plannedProtein)}g planned</small></div>
-            <div class="metric"><span class="value">${mealLogCount(day)}/3</span><span class="label">meals logged</span><small>${plannedMealCount(day)}/3 ate plan</small></div>
+          <div class="grid four">
+            <div class="metric"><span class="value">${Math.round(totals.loggedCalories)}</span><span class="label">logged calories</span><small>${calorieGoal} goal</small></div>
+            <div class="metric"><span class="value">${signedRemainingText(caloriesRemaining)}</span><span class="label">calorie room</span><small>based on logged food</small></div>
+            <div class="metric"><span class="value">${Math.round(totals.loggedProtein)}g</span><span class="label">logged protein</span><small>${Math.round(proteinRemaining)}g left</small></div>
+            <div class="metric"><span class="value">${Math.round(totals.loggedFiber)}g</span><span class="label">logged fiber</span><small>${Math.round(fiberRemaining)}g left</small></div>
           </div>
+          <p class="note"><strong>Today:</strong> ${escapeHtml(mealDashboardGuidance(day, totals))}</p>
         </div>
         ${MEAL_KEYS.map(key => mealEditorCard(key, plan.meals[key], day)).join('')}
       </div>
