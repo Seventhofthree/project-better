@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pathfinder-0.8.8.1';
+const CACHE_NAME = 'pathfinder-0.8.8.4';
 const ASSETS = [
   './',
   './index.html',
@@ -28,39 +28,32 @@ self.addEventListener('activate', event => {
 });
 
 function isSameOriginRequest(request) {
-  try {
-    return new URL(request.url).origin === self.location.origin;
-  } catch {
-    return false;
-  }
+  try { return new URL(request.url).origin === self.location.origin; }
+  catch { return false; }
 }
 
 async function networkFirst(request, fallbackUrl = './index.html') {
   const cache = await caches.open(CACHE_NAME);
-
   try {
-    const response = await fetch(request);
-    if (response && response.ok) {
-      cache.put(request, response.clone());
-    }
+    const response = await fetch(request, { cache: 'no-store' });
+    if (response && response.ok) cache.put(request, response.clone());
     return response;
   } catch {
-    const cached = await caches.match(request, { ignoreSearch: true });
-    if (cached) return cached;
-
+    const cachedExact = await caches.match(request);
+    if (cachedExact) return cachedExact;
+    const cachedIgnore = await caches.match(request, { ignoreSearch: true });
+    if (cachedIgnore) return cachedIgnore;
     if (fallbackUrl) {
       const fallback = await caches.match(fallbackUrl, { ignoreSearch: true });
       if (fallback) return fallback;
     }
-
     throw new Error('Pathfinder offline cache miss');
   }
 }
 
 async function cacheFirst(request) {
-  const cached = await caches.match(request, { ignoreSearch: true });
+  const cached = await caches.match(request);
   if (cached) return cached;
-
   const response = await fetch(request);
   if (response && response.ok && isSameOriginRequest(request)) {
     const cache = await caches.open(CACHE_NAME);
@@ -71,7 +64,6 @@ async function cacheFirst(request) {
 
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
-
   const requestUrl = new URL(event.request.url);
   const isNavigation = event.request.mode === 'navigate';
   const isAppFile = isSameOriginRequest(event.request) && ASSETS.some(asset => {

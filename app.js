@@ -1,10 +1,10 @@
-/* Pathfinder 0.8.8.3
+/* Pathfinder 0.8.8.4
    Local-first daily companion app. No account, no server, no dependencies.
-   0.8.8.3 is a direct save repair: localStorage primary + backup are the save path.
+   0.8.8.4 is a no-bootstrap save repair: app.js loads directly and localStorage is the save path.
    IndexedDB mirror/hydration is temporarily disabled to stop stale data from overwriting fresh logs.
 */
 
-const APP_VERSION = '0.8.8.3';
+const APP_VERSION = '0.8.8.4';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const IDB_DB_NAME = 'pathfinder-local-state';
@@ -508,14 +508,18 @@ function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, payload);
     localStorage.setItem(STORAGE_BACKUP_KEY, payload);
+    const verifyPrimary = localStorage.getItem(STORAGE_KEY);
+    if (verifyPrimary !== payload) {
+      throw new Error('localStorage verification failed after save');
+    }
     storageLastError = '';
   } catch (error) {
     storageLastError = error.message || String(error);
     console.warn('Unable to save Pathfinder state to localStorage:', error);
     showToast?.('Storage warning: export a backup');
   }
-  // 0.8.8.3 direct save repair:
-  // IndexedDB mirror saving is temporarily disabled because a stale mirror could overwrite fresh localStorage logs after refresh.
+  // 0.8.8.4 no-bootstrap save repair:
+  // IndexedDB mirror saving is temporarily disabled. localStorage primary + backup are the save path.
   // queueIndexedDbSave(payload);
 }
 
@@ -2664,7 +2668,9 @@ wireEvents();
 render();
 registerServiceWorker();
 requestPersistentStorage();
-// 0.8.8.3 direct save repair:
+// 0.8.8.4 no-bootstrap save repair:
+// Disabled because stale IndexedDB could overwrite fresh localStorage logs after refresh.
+// 0.8.8.4 no-bootstrap save repair:
 // Disabled because stale IndexedDB could overwrite fresh localStorage logs after refresh.
 // hydrateFromIndexedDb();
 window.addEventListener('pagehide', flushStateOnPageLeave);
