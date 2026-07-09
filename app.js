@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.6
+/* Pathfinder 0.9.7
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.6 is an Assistant Layer release built from the verified 0.9.5 source.
-   Adds companion-style daily guidance using existing logged data without changing persistence.
+   0.9.7 is a Mobile / PWA Polish release built from the verified 0.9.6 source.
+   Adds mobile guidance, compact mode, and app status messaging without changing persistence.
 */
 
-const APP_VERSION = '0.9.6';
+const APP_VERSION = '0.9.7';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -413,6 +413,7 @@ function defaultState() {
       morningBrief: true,
       windDown: true,
       assistantTone: 'friendly',
+      compactMode: false,
       weatherEnabled: true,
       weatherLocation: 'Muskogee, OK',
       weatherLatitude: 35.7479,
@@ -922,6 +923,8 @@ function dataQuality(day) {
 function setTitle(title) { $('#page-title').textContent = title; }
 
 function render() {
+  injectMobilePwaStyles();
+  applyCompactModeClass();
   $('#date-picker').value = appState.selectedDate;
   $$('.tabs button').forEach(button => button.classList.toggle('active', button.dataset.tab === appState.activeTab));
   const renderers = { today: renderToday, meals: renderMeals, food: renderFood, exercise: renderExercise, guide: renderGuide, routines: renderRoutines, assistant: renderAssistant, progress: renderProgress, review: renderReview, history: renderHistory, settings: renderSettings };
@@ -2739,6 +2742,102 @@ function runSaveTest() {
   showToast(passed ? 'Save test passed' : 'Save test failed');
 }
 
+
+function appInstallStatus() {
+  const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone;
+  if (standalone) return 'Installed app view';
+  return 'Browser view';
+}
+
+function appConnectionStatus() {
+  return navigator.onLine ? 'Online' : 'Offline';
+}
+
+function appCacheStatusText() {
+  const sw = 'serviceWorker' in navigator ? 'Service worker supported' : 'Service worker unavailable';
+  const cache = 'caches' in window ? 'offline cache supported' : 'offline cache unavailable';
+  const install = appInstallStatus();
+  return `${install}. ${appConnectionStatus()}. ${sw}; ${cache}.`;
+}
+
+function injectMobilePwaStyles() {
+  if (document.querySelector('#pathfinder-mobile-pwa-polish')) return;
+  const style = document.createElement('style');
+  style.id = 'pathfinder-mobile-pwa-polish';
+  style.textContent = `
+    :root { --tap-target: 44px; }
+    button, input, select, textarea { font-size: 16px; }
+    button.small, .ghost.small, .secondary.small, .primary.small { min-height: var(--tap-target); padding: 10px 14px; }
+    .tabs { scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+    .tabs button { min-height: var(--tap-target); white-space: nowrap; }
+    .toggle-row.tight { gap: 8px; }
+    .companion-card { scroll-margin-top: 90px; }
+    body.compact-mode .card { padding: 14px; }
+    body.compact-mode .grid { gap: 12px; }
+    body.compact-mode .metric { padding: 12px; }
+    body.compact-mode .note, body.compact-mode p { line-height: 1.45; }
+    @media (max-width: 720px) {
+      body { padding-bottom: env(safe-area-inset-bottom); }
+      .app-shell { width: min(100%, 100vw); padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+      .topbar { gap: 12px; align-items: flex-start; }
+      .date-controls { width: 100%; display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px 70px; gap: 8px; }
+      .date-controls input[type="date"] { min-width: 0; width: 100%; }
+      .tabs { margin-left: -12px; margin-right: -12px; padding: 8px 12px; border-radius: 0; position: sticky; top: 0; z-index: 25; }
+      .tabs button { flex: 0 0 auto; padding: 10px 14px; }
+      .grid, .grid.two, .grid.three, .grid.four, .grid.sidebar, .grid.wide-sidebar { grid-template-columns: 1fr !important; }
+      .input-row, .input-row.two, .input-row.three, .input-row.four { grid-template-columns: 1fr !important; }
+      .toggle-row { align-items: stretch; }
+      .toggle-row button { flex: 1 1 auto; }
+      .metric .value { font-size: clamp(1.2rem, 7vw, 2rem); }
+      .assistant-output, .review-output { white-space: pre-wrap; overflow-wrap: anywhere; }
+      canvas { width: 100% !important; height: auto !important; }
+    }
+    @media (max-width: 420px) {
+      .topbar h1 { font-size: 1.6rem; }
+      .card-title { align-items: flex-start; gap: 10px; }
+      .card-title .badge { align-self: flex-start; }
+      .toggle-row { flex-direction: column; }
+      .toggle-row.tight { flex-direction: row; overflow-x: auto; }
+      .toggle-row.tight button { flex: 0 0 auto; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function applyCompactModeClass() {
+  document.body.classList.toggle('compact-mode', !!appState.data.settings.compactMode);
+}
+
+function mobileTipsCardHtml() {
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Mobile / app status</h3>
+        <p>Pathfinder is designed to stay local-first and usable on phone screens.</p>
+      </div>
+      <span class="badge ${navigator.onLine ? 'blue' : 'warn'}">${escapeHtml(appConnectionStatus())}</span>
+    </div>
+    <div class="grid three">
+      <div class="metric"><span class="value">${escapeHtml(appInstallStatus())}</span><span class="label">display mode</span><small>install from browser menu if desired</small></div>
+      <div class="metric"><span class="value">${'serviceWorker' in navigator ? 'ready' : 'missing'}</span><span class="label">offline shell</span><small>cached after first load</small></div>
+      <div class="metric"><span class="value">${appState.data.settings.compactMode ? 'compact' : 'comfortable'}</span><span class="label">layout mode</span><small>toggle below</small></div>
+    </div>
+    <p class="note">${escapeHtml(appCacheStatusText())}</p>
+    <div class="toggle-row">
+      <button class="${appState.data.settings.compactMode ? 'primary' : 'secondary'} small" data-action="toggle-setting" data-setting="compactMode">Compact mode ${appState.data.settings.compactMode ? 'on' : 'off'}</button>
+      <button class="ghost small" data-action="jump" data-tab-target="today">Back to Today</button>
+    </div>
+  </div>`;
+}
+
+function updateReadyCardHtml() {
+  return `<div class="card">
+    <h3>Update habit</h3>
+    <p>After an update, open the versioned link, check Settings, then run the save test before using the app normally.</p>
+    <p class="note">Current release: ${escapeHtml(window.__PATHFINDER_RELEASE__?.release || APP_VERSION)} · cache ${escapeHtml(window.__PATHFINDER_RELEASE__?.serviceWorkerCache || 'unknown')}</p>
+  </div>`;
+}
+
 function renderSettings() {
   setTitle('Settings');
   const settings = appState.data.settings;
@@ -2782,6 +2881,8 @@ function renderSettings() {
       </div>
       <aside class="grid">
         ${updateSafetyCardHtml()}
+        ${mobileTipsCardHtml()}
+        ${updateReadyCardHtml()}
         ${storageDebugCardHtml()}
         <div class="card">
           <h3>Storage status</h3>
@@ -3786,6 +3887,8 @@ function registerServiceWorker() {
 }
 
 wireEvents();
+window.addEventListener('online', () => showToast('Pathfinder is online'));
+window.addEventListener('offline', () => showToast('Pathfinder is offline. Local data still works.'));
 render();
 registerServiceWorker();
 requestPersistentStorage();
