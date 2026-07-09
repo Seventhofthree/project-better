@@ -1,55 +1,55 @@
 # Pathfinder Roadmap to 1.0
 
-## Current: 0.8.8 — Data Safety Cleanup
+## Current: 0.8.8.1 — Save Reliability Fix
 
 ### Purpose
 
-Make saved data safer and stop read-only screens from creating fake blank day records.
+Fix the failed 0.8.8 patch and restore reliable saving.
 
 ### What changed
 
-- Runtime patch over the current `app.js`.
-- `getDay()` no longer saves immediately when creating a day.
-- Added `peekDay()` for read-only views.
-- History and weekly stats use `peekDay()`.
-- `saveState()` prunes empty auto-created days before writing.
-- Added Data safety card in Settings.
-- Added Download best backup.
-- Added Repair from best backup.
+- Removed the risky 0.8.8 runtime patch.
+- Kept startup restore from localStorage, backup localStorage, legacy storage, and IndexedDB.
+- Kept App version card.
+- Kept Data safety card.
+- Kept Download best backup.
+- Kept Repair from best backup.
+- Loaded the real `app.js` normally again.
 
 ### Done When
 
-- Settings shows `0.8.8 Data Safety Cleanup`.
-- Settings shows Runtime patch `0.8.8`.
-- Settings shows Data safety card.
-- Opening History does not create blank saved records.
-- Opening Review does not create blank saved records.
-- Meal logging survives refresh.
+- Settings shows `0.8.8.1 Save Reliability Fix`.
+- Runtime patch says `removed`.
+- Meal status logging survives refresh.
+- Meal note or swap survives refresh.
 - Exercise logging survives refresh.
-- Weight entry survives refresh.
-- Download best backup works.
+- Water/check-in survives refresh.
+- Weight entry survives refresh from normal tracking.
+- Download best backup creates a JSON file.
 - Phone and PC both show the same version.
 
-## 0.8.9 — Code Organization Cleanup
+## 0.8.9 — Real Source Cleanup
 
 ### Purpose
 
-Make the app easier and safer to build on without changing to React, Next.js, or a server.
+Fix data safety the right way by editing the actual app source instead of runtime-patching it.
 
 ### Planned changes
 
-- Split the giant `app.js` into smaller files.
-- Keep the static GitHub Pages deployment model.
-- Move storage, state, migrations, meals, exercise, routines, assistant, weather, charts, rendering, and events into separate files.
-- Unify version number source so `app.js`, bootstrap, and Settings agree without explanation.
+- Modify the real `app.js` source directly.
+- Stop read-only screens from saving blank days.
+- Add `peekDay()` directly in source.
+- Make History, Review, Progress, and Assistant use read-only day access.
+- Keep saving behavior for real user actions untouched.
+- Unify version display.
 
 ### Done When
 
-- App still works visually the same.
-- Settings version info is consistent.
-- Save tests still pass.
-- No Next.js starter folder returns.
-- Future feature edits can target smaller files instead of one huge `app.js`.
+- Saving works for meals, notes, exercise, check-in, water, and weight.
+- Opening History does not create blank saved records.
+- Opening Review does not create blank saved records.
+- App version/source version agree.
+- Phone and PC both pass the same save tests.
 
 ## 0.9.0 — Local Data Foundation
 
@@ -236,22 +236,6 @@ Make Pathfinder comfortable as a daily phone app.
 
 Stop adding features and test the whole app like 1.0 is close.
 
-### Planned tests
-
-- New user startup.
-- Existing user migration.
-- Meal save/refresh.
-- Exercise save/refresh.
-- Weight save/refresh.
-- History no fake records.
-- Export backup.
-- Reset.
-- Import restore.
-- Offline use.
-- Service worker update.
-- Phone test.
-- PC test.
-
 ### Done When
 
 - No known data-loss bugs.
@@ -265,17 +249,6 @@ Stop adding features and test the whole app like 1.0 is close.
 
 Freeze major features and prepare for stable release.
 
-### Planned changes
-
-- Bug fixes only.
-- Clean README.
-- Clean roadmap.
-- Add simple user instructions.
-- Add update instructions.
-- Add backup instructions.
-- Final version card.
-- Final migration check.
-
 ### Done When
 
 - Daily use feels stable.
@@ -288,27 +261,6 @@ Freeze major features and prepare for stable release.
 ### Purpose
 
 A reliable local-first daily companion for food, movement, routines, progress, and review.
-
-### Included
-
-- Stable daily food logging.
-- 3-meal rice plan support.
-- Custom foods and saved meals.
-- Calorie/protein/fiber tracking.
-- Exercise logging.
-- Beginner exercise guide.
-- Routine tracking.
-- Weight tracking.
-- Progress trends.
-- Morning brief.
-- Evening wind-down.
-- Weekly review.
-- History.
-- Backup/export/import.
-- Offline/PWA support.
-- Visible version number.
-- Clear update process.
-- Safe local data foundation.
 
 ### Done When
 
