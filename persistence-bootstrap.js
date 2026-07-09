@@ -1,11 +1,11 @@
 (() => {
-  const RELEASE_LABEL = '0.8.9 Real Source Cleanup Phase 1';
-  const APP_SCRIPT = './app.js?v=0.8.9';
+  const RELEASE_LABEL = '0.9.0 Update Safety';
+  const APP_SCRIPT = './app.js?v=0.9.0';
   window.__PATHFINDER_RELEASE__ = {
     release: RELEASE_LABEL,
     bootstrapVersion: 'removed/inert fallback',
-    coreAppVersion: '0.8.9',
-    serviceWorkerCache: 'pathfinder-0.8.9'
+    coreAppVersion: '0.9.0',
+    serviceWorkerCache: 'pathfinder-0.9.0'
   };
   function setLoadingMessage(message) {
     const app = document.querySelector('#app');
@@ -26,7 +26,7 @@
     if (!('caches' in window)) return;
     try {
       const keys = await caches.keys();
-      await Promise.all(keys.filter(key => key.startsWith('pathfinder-') && key !== 'pathfinder-0.8.9').map(key => caches.delete(key)));
+      await Promise.all(keys.filter(key => key.startsWith('pathfinder-') && key !== 'pathfinder-0.9.0').map(key => caches.delete(key)));
     } catch {}
   }
   async function start() {

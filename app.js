@@ -416,7 +416,9 @@ function defaultState() {
       weatherLocation: 'Muskogee, OK',
       weatherLatitude: 35.7479,
       weatherLongitude: -95.3697,
-      foodSearch: ''
+      foodSearch: '',
+      lastSaveTestAt: '',
+      lastSaveTestResult: ''
     },
     plan: structuredClone(defaultMealPlan),
     foods: structuredClone(defaultFoods),
@@ -1703,6 +1705,177 @@ function renderHistory() {
     </section>`;
 }
 
+
+function storageCandidateSummary(label, raw) {
+  const parsed = parseStateCandidate(raw, label);
+  if (!parsed) {
+    return { label, exists: false, version: '', updatedAt: '', days: 0, meaningfulDays: 0, bytes: raw ? raw.length : 0 };
+  }
+  const days = Object.values(parsed.parsed.days || {});
+  return {
+    label,
+    exists: true,
+    version: parsed.parsed.version || '',
+    updatedAt: parsed.parsed.meta?.updatedAt || parsed.parsed.meta?.createdAt || '',
+    days: days.length,
+    meaningfulDays: days.filter(dayHasUserData).length,
+    bytes: raw.length
+  };
+}
+
+function storageDiagnostics() {
+  return [
+    storageCandidateSummary('localStorage primary', safeLocalGet(STORAGE_KEY)),
+    storageCandidateSummary('localStorage backup', safeLocalGet(STORAGE_BACKUP_KEY)),
+    storageCandidateSummary('sessionStorage refresh fallback', safeSessionGet(SESSION_STORAGE_KEY))
+  ];
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+function formatStoredDate(value) {
+  if (!value) return 'not recorded';
+  try { return new Date(value).toLocaleString(); }
+  catch { return value; }
+}
+
+function storageDiagnosticsRowsHtml() {
+  return storageDiagnostics().map(item => `
+    <div class="storage-row">
+      <div>
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${item.exists ? `${item.meaningfulDays}/${item.days} meaningful days · version ${escapeHtml(item.version || 'unknown')}` : 'not found'}</small>
+      </div>
+      <div class="right-text">
+        <small>${escapeHtml(formatBytes(item.bytes))}</small>
+        <small>${escapeHtml(formatStoredDate(item.updatedAt))}</small>
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateSafetyCardHtml() {
+  const settings = appState.data.settings || {};
+  const release = window.__PATHFINDER_RELEASE__ || {};
+  const lastResult = settings.lastSaveTestResult || 'Not run yet';
+  const resultBadge = lastResult.includes('passed') ? '' : lastResult === 'Not run yet' ? 'neutral' : 'warn';
+  return `<div class="card update-safety-card">
+    <div class="card-title">
+      <div>
+        <h3>Update safety</h3>
+        <p>Use this before and after each Pathfinder update.</p>
+      </div>
+      <span class="badge blue">${escapeHtml(APP_VERSION)}</span>
+    </div>
+    <div class="stack small-stack">
+      <small>Release: ${escapeHtml(release.release || `Pathfinder ${APP_VERSION}`)}</small>
+      <small>Core app.js: ${escapeHtml(release.coreAppVersion || APP_VERSION)}</small>
+      <small>Bootstrap: ${escapeHtml(release.bootstrapVersion || 'removed')}</small>
+      <small>Service worker cache: ${escapeHtml(release.serviceWorkerCache || 'pathfinder-' + APP_VERSION)}</small>
+      <small>Loaded saved state from: ${escapeHtml(storageLoadSource || 'unknown')}</small>
+      <small>Last saved: ${escapeHtml(formatStoredDate(appState.data.meta?.updatedAt))}</small>
+    </div>
+    <div class="toggle-row" style="margin-top:12px;">
+      <button class="primary small" data-action="run-save-test">Run save test</button>
+      <button class="ghost small" data-action="export-json">Export backup</button>
+      <button class="ghost small" data-action="copy-storage-debug">Copy debug info</button>
+    </div>
+    <p class="note"><strong>Save test:</strong> <span class="badge ${resultBadge}">${escapeHtml(lastResult)}</span>${settings.lastSaveTestAt ? ` · ${escapeHtml(formatStoredDate(settings.lastSaveTestAt))}` : ''}</p>
+  </div>`;
+}
+
+function storageDebugCardHtml() {
+  const diagnostics = storageDiagnostics();
+  const anyMissing = diagnostics.filter(item => !item.exists).length;
+  const badge = storageLastError ? 'warn' : anyMissing >= diagnostics.length ? 'warn' : '';
+  return `<div class="card storage-debug-card">
+    <div class="card-title">
+      <div>
+        <h3>Storage debug</h3>
+        <p>Quick view of the saved copies Pathfinder can recover from.</p>
+      </div>
+      <span class="badge ${badge}">${storageLastError ? 'Warning' : 'Ready'}</span>
+    </div>
+    <div class="stack small-stack">
+      ${storageDiagnosticsRowsHtml()}
+    </div>
+    ${storageLastError ? `<p class="note"><strong>Last storage warning:</strong> ${escapeHtml(storageLastError)}</p>` : '<p class="note">Primary, backup, and refresh fallback are checked without changing your data.</p>'}
+  </div>`;
+}
+
+function storageDebugPacket() {
+  const selectedDay = appState.data.days?.[appState.selectedDate] || null;
+  return {
+    appVersion: APP_VERSION,
+    release: window.__PATHFINDER_RELEASE__ || null,
+    selectedDate: appState.selectedDate,
+    activeTab: appState.activeTab,
+    storageLoadSource,
+    storageLastError,
+    updatedAt: appState.data.meta?.updatedAt || '',
+    storageDiagnostics: storageDiagnostics(),
+    selectedDaySummary: selectedDay ? {
+      mealStatuses: selectedDay.meals?.statuses || {},
+      mealNotes: selectedDay.meals?.notes || {},
+      exercise: selectedDay.exercise || {},
+      checkin: selectedDay.checkin || {},
+      weight: selectedDay.weight || '',
+      score: completionScore(selectedDay)
+    } : null
+  };
+}
+
+async function copyStorageDebugInfo() {
+  const text = JSON.stringify(storageDebugPacket(), null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Debug info copied');
+  } catch {
+    console.log('Pathfinder storage debug info:', text);
+    showToast('Clipboard blocked; debug info printed to console');
+  }
+}
+
+function runSaveTest() {
+  const testKey = 'pathfinder.save-test.v1';
+  const payload = JSON.stringify({
+    app: 'Pathfinder',
+    version: APP_VERSION,
+    writtenAt: new Date().toISOString(),
+    random: Math.random().toString(36).slice(2)
+  });
+
+  const results = [];
+
+  try {
+    localStorage.setItem(testKey, payload);
+    results.push(localStorage.getItem(testKey) === payload ? 'localStorage passed' : 'localStorage failed verification');
+    localStorage.removeItem(testKey);
+  } catch (error) {
+    results.push(`localStorage failed: ${error.message || error}`);
+  }
+
+  try {
+    sessionStorage.setItem(testKey, payload);
+    results.push(sessionStorage.getItem(testKey) === payload ? 'sessionStorage passed' : 'sessionStorage failed verification');
+    sessionStorage.removeItem(testKey);
+  } catch (error) {
+    results.push(`sessionStorage failed: ${error.message || error}`);
+  }
+
+  const passed = results.some(result => result.includes('passed'));
+  appState.data.settings.lastSaveTestAt = new Date().toISOString();
+  appState.data.settings.lastSaveTestResult = passed ? `passed · ${results.join(' · ')}` : `failed · ${results.join(' · ')}`;
+  saveState();
+  render();
+  showToast(passed ? 'Save test passed' : 'Save test failed');
+}
+
 function renderSettings() {
   setTitle('Settings');
   const settings = appState.data.settings;
@@ -1745,6 +1918,8 @@ function renderSettings() {
         </div>
       </div>
       <aside class="grid">
+        ${updateSafetyCardHtml()}
+        ${storageDebugCardHtml()}
         <div class="card">
           <h3>Storage status</h3>
           <p>Saved on this device/browser. Cloud sync starts in 0.9.</p>
@@ -2496,6 +2671,8 @@ function handleAction(action) {
     case 'copy-review': navigator.clipboard?.writeText(buildWeeklyReview(weeklyStats(appState.selectedDate))); showToast('Review copied'); break;
     case 'copy-ai-summary': navigator.clipboard?.writeText(buildAiReviewPacket(weeklyStats(appState.selectedDate))); showToast('AI packet copied'); break;
     case 'force-save': saveState(); render(); showToast('Saved on this device'); break;
+    case 'run-save-test': runSaveTest(); break;
+    case 'copy-storage-debug': copyStorageDebugInfo(); break;
     case 'export-csv': exportCsv(); break;
     case 'export-json': exportJson(); break;
     case 'reset-app': if (confirm('Reset Pathfinder data on this browser?')) { appState.data = defaultState(); saveState(); render(); showToast('Reset complete'); } break;
