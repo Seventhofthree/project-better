@@ -1,10 +1,10 @@
-/* Pathfinder 0.8.6
+/* Pathfinder 0.8.8.3
    Local-first daily companion app. No account, no server, no dependencies.
-   0.8.6 is an emergency persistence patch: dual localStorage saves,
-   IndexedDB mirror, pagehide autosave, and storage status checks.
+   0.8.8.3 is a direct save repair: localStorage primary + backup are the save path.
+   IndexedDB mirror/hydration is temporarily disabled to stop stale data from overwriting fresh logs.
 */
 
-const APP_VERSION = '0.8.6';
+const APP_VERSION = '0.8.8.3';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const IDB_DB_NAME = 'pathfinder-local-state';
@@ -514,7 +514,9 @@ function saveState() {
     console.warn('Unable to save Pathfinder state to localStorage:', error);
     showToast?.('Storage warning: export a backup');
   }
-  queueIndexedDbSave(payload);
+  // 0.8.8.3 direct save repair:
+  // IndexedDB mirror saving is temporarily disabled because a stale mirror could overwrite fresh localStorage logs after refresh.
+  // queueIndexedDbSave(payload);
 }
 
 function queueIndexedDbSave(payload) {
@@ -603,7 +605,12 @@ async function requestPersistentStorage() {
 }
 
 function flushStateOnPageLeave() {
-  try { saveState(); } catch (error) { console.warn('Final save failed:', error); }
+  try {
+    saveState();
+    localStorage.setItem('pathfinder.last-flush.v1', new Date().toISOString());
+  } catch (error) {
+    console.warn('Final save failed:', error);
+  }
 }
 
 function toDateKey(date) {
@@ -2657,6 +2664,8 @@ wireEvents();
 render();
 registerServiceWorker();
 requestPersistentStorage();
-hydrateFromIndexedDb();
+// 0.8.8.3 direct save repair:
+// Disabled because stale IndexedDB could overwrite fresh localStorage logs after refresh.
+// hydrateFromIndexedDb();
 window.addEventListener('pagehide', flushStateOnPageLeave);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushStateOnPageLeave(); });
