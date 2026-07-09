@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.3
+/* Pathfinder 0.9.4
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.3 is a Progress Trend Polish release built from the verified 0.9.2 source.
-   Adds clearer trend language, scale context, and progress guidance without changing persistence.
+   0.9.4 is an Evening Review / Weekly Review release built from the verified 0.9.3 source.
+   Adds clearer daily recap and weekly coaching cards without changing persistence.
 */
 
-const APP_VERSION = '0.9.3';
+const APP_VERSION = '0.9.4';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -2056,22 +2056,172 @@ function renderProgress() {
   drawWeightChart();
   drawHabitChart(stats);
 }
-function renderReview() {
-  setTitle('Review');
-  const stats = weeklyStats(appState.selectedDate);
-  $('#app').innerHTML = `
-    <section class="grid sidebar">
-      <div class="card highlight">
-        <div class="card-title"><div><h3>Weekly review</h3><p>Saturday-night style review with what worked, what got in the way, next-week focus, and an AI-ready packet for deeper analysis later.</p></div><span class="badge">${formatDate(stats.start, 'short')} – ${formatDate(stats.end, 'short')}</span></div>
-        <div class="review-output">${escapeHtml(buildWeeklyReview(stats))}</div>
-      </div>
-      <aside class="grid">
-        <div class="card"><h3>Week stats</h3><div class="grid two"><div class="metric"><span class="value">${stats.score}%</span><span class="label">avg score</span></div><div class="metric"><span class="value">${stats.workouts}/7</span><span class="label">movement</span></div><div class="metric"><span class="value">${stats.mealLogDays}/7</span><span class="label">meal log days</span></div><div class="metric"><span class="value">${stats.windDowns}/7</span><span class="label">wind-downs</span></div></div></div>
-        <div class="card"><h3>Copy review</h3><p>Use this if you want to paste the review back into chat for deeper analysis later.</p><div class="toggle-row"><button class="primary" data-action="copy-review">Copy review</button><button class="secondary" data-action="copy-ai-summary">Copy AI packet</button></div></div>
-      </aside>
-    </section>`;
+
+function dailyWinsList(day) {
+  const wins = [];
+  if (mealLogComplete(day)) wins.push('Food loop closed');
+  else if (MEAL_KEYS.some(key => mealLogged(day, key))) wins.push('Some food logged');
+  if (day.exercise.status === 'full') wins.push('Full workout completed');
+  if (day.exercise.status === 'minimum') wins.push('Minimum movement protected the habit');
+  if (day.exercise.status === 'recovery') wins.push('Recovery movement counted');
+  if (routineCompletion(day) >= 80) wins.push('Routine mostly finished');
+  else if (routineCompletion(day) >= 40) wins.push('Routine started');
+  if (day.windDown.completed) wins.push('Wind-down completed');
+  if (Number(day.checkin.water || 0) >= Number(appState.data.settings.waterGoal || 8)) wins.push('Water goal hit');
+  if (!wins.length) wins.push('You still created data Pathfinder can use');
+  return wins;
 }
 
+function dailyAdjustmentsList(day) {
+  const items = [];
+  if (!mealLogComplete(day)) items.push('Close food gaps with a quick estimate instead of leaving blanks.');
+  if (!['full','minimum','recovery'].includes(day.exercise.status)) items.push('Use the minimum-win movement option before the day gets away from you.');
+  if (routineCompletion(day) < 60) items.push('Shrink the routine to the next one or two useful actions.');
+  if (!day.windDown.completed) items.push('End with a one-sentence wind-down. No long journal required.');
+  if (Number(day.checkin.water || 0) < Number(appState.data.settings.waterGoal || 8)) items.push('Start water earlier tomorrow instead of catching up at night.');
+  if (!items.length) items.push('Do not add complexity tomorrow. Repeat the same boring win.');
+  return items;
+}
+
+function dailyNextBestStep(day) {
+  if (!mealLogComplete(day)) return 'Log or estimate the missing meal slots.';
+  if (!['full','minimum','recovery'].includes(day.exercise.status)) return 'Take the minimum-win movement option.';
+  if (routineCompletion(day) < 60) return 'Do the next unfinished routine item.';
+  if (!day.windDown.completed) return 'Write the one-sentence wind-down.';
+  return 'Set up tomorrow to be easy: food, water, and a tiny movement plan.';
+}
+
+function dailyReviewCardHtml(day) {
+  const score = completionScore(day);
+  const wins = dailyWinsList(day);
+  const adjustments = dailyAdjustmentsList(day);
+  const note = day.dailyNote || day.checkin.notes || day.exercise.notes || day.windDown.note || '';
+  const badge = score >= 75 ? '' : score >= 45 ? 'blue' : 'neutral';
+  return `<div class="card highlight">
+    <div class="card-title">
+      <div>
+        <h3>Evening review</h3>
+        <p>Close the day with useful feedback, not judgment.</p>
+      </div>
+      <span class="badge ${badge}">${score}% today</span>
+    </div>
+    <div class="grid three">
+      <div class="metric"><span class="value">${mealLogComplete(day) ? 'closed' : `${mealLogCount(day)}/3`}</span><span class="label">food loop</span><small>${plannedMealCount(day)}/3 ate plan</small></div>
+      <div class="metric"><span class="value">${escapeHtml(day.exercise.status ? exerciseStatusLabels[day.exercise.status] || day.exercise.status : 'open')}</span><span class="label">movement</span><small>${day.exercise.minutes || 0} min</small></div>
+      <div class="metric"><span class="value">${routineCompletion(day)}%</span><span class="label">routine</span><small>${day.windDown.completed ? 'wind-down done' : 'wind-down open'}</small></div>
+    </div>
+    <div class="grid two" style="margin-top:14px;">
+      <div>
+        <h3>What went well</h3>
+        <ul class="check-list mini-list">${wins.map(item => `<li><span>✓</span><span>${escapeHtml(item)}</span></li>`).join('')}</ul>
+      </div>
+      <div>
+        <h3>What to adjust</h3>
+        <ul class="check-list mini-list">${adjustments.slice(0, 4).map(item => `<li><span>→</span><span>${escapeHtml(item)}</span></li>`).join('')}</ul>
+      </div>
+    </div>
+    <p class="note"><strong>Next best step:</strong> ${escapeHtml(dailyNextBestStep(day))}</p>
+    ${note ? `<p class="note"><strong>Note:</strong> ${escapeHtml(note)}</p>` : ''}
+  </div>`;
+}
+
+function weeklyReviewDashboardHtml(stats) {
+  const trend = weightTrendDetail(stats);
+  const prior = weeklyStats(shiftDate(stats.start, -1));
+  const scoreDelta = stats.score - prior.score;
+  const mealDelta = stats.mealLogDays - prior.mealLogDays;
+  const movementDelta = stats.workouts - prior.workouts;
+  const badge = stats.score >= 75 ? '' : stats.score >= 45 ? 'blue' : 'neutral';
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Weekly dashboard</h3>
+        <p>Pattern check for the last seven days.</p>
+      </div>
+      <span class="badge ${badge}">${stats.score}% week</span>
+    </div>
+    <div class="grid four">
+      <div class="metric"><span class="value">${deltaText(scoreDelta, '%')}</span><span class="label">score change</span><small>vs prior 7 days</small></div>
+      <div class="metric"><span class="value">${deltaText(mealDelta, '')}</span><span class="label">meal-log days</span><small>${stats.mealLogDays}/7 this week</small></div>
+      <div class="metric"><span class="value">${deltaText(movementDelta, '')}</span><span class="label">movement days</span><small>${stats.workouts}/7 this week</small></div>
+      <div class="metric"><span class="value">${escapeHtml(trend.changeText)}</span><span class="label">scale direction</span><small>${escapeHtml(trend.label)}</small></div>
+    </div>
+    <p class="note"><strong>Weekly read:</strong> ${escapeHtml(trend.meaning)}</p>
+  </div>`;
+}
+
+function weeklyCoachCardsHtml(stats) {
+  const weakest = weakestMeal(stats);
+  const win = weeklyWin(stats).split('\n').map(line => line.replace(/^- /, '')).filter(Boolean);
+  const friction = weeklyFriction(stats, weakest).split('\n').map(line => line.replace(/^- /, '')).filter(Boolean);
+  return `<div class="grid three">
+    <div class="card">
+      <h3>What went well</h3>
+      <ul class="check-list mini-list">${win.map(item => `<li><span>✓</span><span>${escapeHtml(item)}</span></li>`).join('')}</ul>
+    </div>
+    <div class="card">
+      <h3>What got in the way</h3>
+      <ul class="check-list mini-list">${friction.map(item => `<li><span>→</span><span>${escapeHtml(item)}</span></li>`).join('')}</ul>
+    </div>
+    <div class="card">
+      <h3>Next best focus</h3>
+      <p>${escapeHtml(nextWeekSuggestion(stats))}</p>
+      <p class="note">Keep this small enough to do after a long workday.</p>
+    </div>
+  </div>`;
+}
+
+function weeklyReviewPacketHtml(stats) {
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Weekly review packet</h3>
+        <p>Copy-ready version for deeper analysis later.</p>
+      </div>
+      <span class="badge neutral">${formatDate(stats.start, 'short')} – ${formatDate(stats.end, 'short')}</span>
+    </div>
+    <div class="review-output">${escapeHtml(buildWeeklyReview(stats))}</div>
+  </div>`;
+}
+
+function renderReview() {
+  setTitle('Review');
+  const day = readDay(appState.selectedDate);
+  const stats = weeklyStats(appState.selectedDate);
+  $('#app').innerHTML = `
+    <section class="grid">
+      ${dailyReviewCardHtml(day)}
+      ${weeklyReviewDashboardHtml(stats)}
+      ${weeklyCoachCardsHtml(stats)}
+      <section class="grid sidebar">
+        ${weeklyReviewPacketHtml(stats)}
+        <aside class="grid">
+          <div class="card">
+            <h3>Week stats</h3>
+            <div class="grid two">
+              <div class="metric"><span class="value">${stats.score}%</span><span class="label">avg score</span></div>
+              <div class="metric"><span class="value">${stats.workouts}/7</span><span class="label">movement</span></div>
+              <div class="metric"><span class="value">${stats.mealLogDays}/7</span><span class="label">meal log days</span></div>
+              <div class="metric"><span class="value">${stats.windDowns}/7</span><span class="label">wind-downs</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Copy review</h3>
+            <p>Use this if you want to paste the review back into chat for deeper analysis later.</p>
+            <div class="toggle-row">
+              <button class="primary" data-action="copy-review">Copy review</button>
+              <button class="secondary" data-action="copy-ai-summary">Copy AI packet</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Review rule</h3>
+            <p>End the day by choosing the next easiest action. Do not punish yourself into a harder plan.</p>
+            <p class="note">The win is making tomorrow easier to start.</p>
+          </div>
+        </aside>
+      </section>
+    </section>`;
+}
 function renderHistory() {
   setTitle('History');
   const rows = historyRows(30);
