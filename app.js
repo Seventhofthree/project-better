@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.1
+/* Pathfinder 0.9.2
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.1 is a Meal Dashboard Polish release built from the verified 0.9.0.1 source.
-   Adds clearer calorie/protein/fiber progress without changing persistence.
+   0.9.2 is an Exercise/Routine Polish release built from the verified 0.9.1 source.
+   Adds clearer workout guidance and routine next-step summaries without changing persistence.
 */
 
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.9.2';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -1463,6 +1463,93 @@ function planMealEditCard(key, meal) {
   </div>`;
 }
 
+
+function exerciseDashboardHtml(day, workout, suggestion) {
+  const chosenStatus = day.exercise.status || 'open';
+  const suggestedSteps = workoutSuggestionSteps(day, workout);
+  const suggestedLabel = suggestion.forceRecovery
+    ? 'Recovery version'
+    : (day.checkin.energy === 'Low' || day.checkin.sleep === 'Poor' || day.checkin.stress === 'High')
+      ? 'Minimum win'
+      : 'Full version';
+  const minutes = day.exercise.minutes || (suggestion.forceRecovery ? 5 : suggestedLabel === 'Minimum win' ? 5 : 25);
+  const statusText = chosenStatus === 'open' ? 'Not logged yet' : (exerciseStatusLabels[day.exercise.status] || chosenStatus);
+  const complete = ['full', 'minimum', 'recovery'].includes(day.exercise.status);
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Today’s movement choice</h3>
+        <p>Pick the smallest version that keeps the habit alive and does not aggravate pain.</p>
+      </div>
+      <span class="badge ${complete ? '' : 'neutral'}">${escapeHtml(statusText)}</span>
+    </div>
+    <div class="grid three">
+      <div class="metric"><span class="value">${escapeHtml(suggestedLabel)}</span><span class="label">suggested version</span><small>${escapeHtml(suggestion.label)}</small></div>
+      <div class="metric"><span class="value">${escapeHtml(String(minutes))}</span><span class="label">starter minutes</span><small>edit if needed</small></div>
+      <div class="metric"><span class="value">${escapeHtml(day.exercise.intensity || 'easy')}</span><span class="label">intensity</span><small>${escapeHtml(day.exercise.pain ? `pain: ${day.exercise.pain}` : 'pain not flagged')}</small></div>
+    </div>
+    <div class="callout" style="margin-top:14px;">
+      <strong>Do this first</strong>
+      <ul class="check-list mini-list">${suggestedSteps.slice(0, 3).map(step => `<li><span>✓</span><span>${escapeHtml(step)}</span></li>`).join('')}</ul>
+    </div>
+    <div class="toggle-row">
+      <button class="secondary small" data-action="log-exercise-status" data-status="minimum">Log minimum win</button>
+      <button class="ghost small" data-action="log-exercise-status" data-status="recovery">Log recovery</button>
+      <button class="ghost small" data-action="open-guide" data-guide-id="${escapeHtml(guideIdForWorkout(workout))}">Movement guide</button>
+    </div>
+  </div>`;
+}
+
+function workoutChoiceHelpHtml(workout) {
+  return `<div class="card">
+    <h3>How to choose today</h3>
+    <div class="stack small-stack">
+      <p><strong>Full win:</strong> Use when energy is okay, pain is not flagged, and you can finish without rushing.</p>
+      <p><strong>Minimum win:</strong> Use when you are tired, busy, low motivation, or just need to keep the chain alive.</p>
+      <p><strong>Recovery:</strong> Use for soreness, stress, rough sleep, or any day where gentle movement is the smarter move.</p>
+    </div>
+    <p class="note">Default workout: ${escapeHtml(workout.title)} · ${escapeHtml(workout.quiet ? 'quiet apartment friendly' : 'normal movement')}</p>
+  </div>`;
+}
+
+function routineProgressDetail(day) {
+  const items = routineItemsForSelectedMode();
+  const done = items.filter(item => day.routine.completedIds[item.id]).length;
+  const total = items.length;
+  const left = Math.max(0, total - done);
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  return { items, done, total, left, percent };
+}
+
+function routineNextItemsHtml(day, limit = 4) {
+  const items = routineItemsForSelectedMode();
+  const next = items.filter(item => !day.routine.completedIds[item.id]).slice(0, limit);
+  if (!next.length) return '<p class="note">All visible routine items are done for this mode.</p>';
+  return `<ul class="routine-list">${next.map(item => `<li><span>○</span><span>${escapeHtml(item.text)}<br><small class="muted">~${item.minutes || 1} min</small></span><button class="ghost small" style="margin-left:auto" data-action="toggle-routine-item" data-id="${escapeHtml(item.id)}">done</button></li>`).join('')}</ul>`;
+}
+
+function routineDashboardHtml(day) {
+  const detail = routineProgressDetail(day);
+  return `<div class="card">
+    <div class="card-title">
+      <div>
+        <h3>Routine status</h3>
+        <p>See what is done, what is left, and the next small action.</p>
+      </div>
+      <span class="badge ${detail.percent >= 80 ? '' : 'neutral'}">${detail.percent}%</span>
+    </div>
+    <div class="grid three">
+      <div class="metric"><span class="value">${detail.done}</span><span class="label">done</span><small>routine items</small></div>
+      <div class="metric"><span class="value">${detail.left}</span><span class="label">left</span><small>${escapeHtml(selectedRoutineLabel())}</small></div>
+      <div class="metric"><span class="value">${detail.total}</span><span class="label">total</span><small>current mode</small></div>
+    </div>
+    <div style="margin-top:14px;">
+      <h3>Next up</h3>
+      ${routineNextItemsHtml(day)}
+    </div>
+  </div>`;
+}
+
 function renderExercise() {
   setTitle('Exercise');
   const day = getDay();
@@ -1498,6 +1585,9 @@ function renderExercise() {
             <button class="ghost" data-action="log-exercise-status" data-status="missed">Missed</button>
           </div>
         </div>
+
+        ${exerciseDashboardHtml(day, workout, suggestion)}
+        ${workoutChoiceHelpHtml(workout)}
 
         <div class="grid three">
           ${workoutVersionCard('Full version', workout.full, 'full')}
@@ -1545,8 +1635,14 @@ function renderExercise() {
 }
 
 function workoutVersionCard(title, steps, status) {
+  const hints = {
+    full: 'Best when time and energy are decent.',
+    minimum: 'Best when tired, busy, or low motivation.',
+    recovery: 'Best when sore, stressed, or protecting the habit.'
+  };
   return `<div class="card flat">
     <div class="card-title"><h3>${escapeHtml(title)}</h3><span class="badge neutral">${escapeHtml(exerciseStatusLabels[status])}</span></div>
+    <p class="note">${escapeHtml(hints[status] || '')}</p>
     <ul class="check-list">${(steps || []).map(item => `<li><span>✓</span><span>${escapeHtml(item)}</span></li>`).join('')}</ul>
     <div class="toggle-row"><button class="ghost small" data-action="log-exercise-status" data-status="${status}">Log this</button></div>
   </div>`;
@@ -1701,6 +1797,7 @@ function renderRoutines() {
             ${Object.entries(appState.data.routines).map(([key, value]) => `<button data-action="set-setting" data-setting="routineMode" data-value="${key}" class="${modeKey === key ? 'active' : ''}">${escapeHtml(value.label || key)}</button>`).join('')}
           </div>
         </div>
+        ${routineDashboardHtml(day)}
         <div class="grid three">
           ${ROUTINE_BLOCKS.map(block => routineBlockCard(block, mode[block] || [], day)).join('')}
         </div>
