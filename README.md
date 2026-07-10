@@ -1,44 +1,51 @@
-# Pathfinder 0.8.6
+# Pathfinder 1.0.1
 
-Pathfinder is a local-first daily companion app for meals, movement, routines, beginner exercise guidance, progress, and weekly review.
+Pathfinder is a local-first daily companion for food, movement, routines, progress, and review.
 
-## What changed through 0.8.6
+## Current release
 
-### 0.8.6 emergency persistence patch
+**1.0.1 — Correctness and Safety**
 
-- Added dual localStorage saves plus an IndexedDB mirror.
-- Added save-on-pagehide/visibility-change behavior for mobile Chrome.
-- Added Storage status in Settings with Last saved and Save now.
-- Requested persistent browser storage when supported.
+This maintenance release fixes the findings that could be addressed without redesigning storage:
 
+- Correct storage-readiness reporting
+- Durable save-test results with passed, degraded, and failed states
+- Correct nutrition totals for selected meal adjustments
+- Correct meal-plan calorie recalculation
+- No blank daily records from navigation, copying, or exporting
+- Safer JSON import with validation, confirmation, and a pre-import backup
+- CSV formula-injection protection
+- Accurate privacy wording
+- Neutral defaults in the public source
+- Current release documentation
 
-### 0.8.3-style cleanup and prediction
+The larger durable-data redesign remains scheduled for Pathfinder 1.1.
 
-- Removed version-note clutter from the main app cards.
-- Added meal recipe cards for the breakfast block and egg fried rice bowls.
-- Added recipe editing fields in the Food / Plan editor tab.
-- Added TDEE inputs in Settings: age, sex, height, baseline activity, and manual fallback maintenance.
-- Updated bodyweight expectation and At this pace projection to use logged food, current/latest weight, calculated TDEE, and logged exercise status/minutes/intensity.
+## Privacy
 
-### 0.8.4-style daily guidance polish
+Pathfinder has no account and no Pathfinder server. Daily tracking history remains in this browser.
 
-- Added a context-aware Today routine focus so the Today tab focuses on the current block instead of showing the entire routine board.
-- Missed earlier routine items collapse into a softer note instead of taking over the day.
-- Added a weather snippet for current conditions and the next few hours.
-- Weather guidance suggests indoor movement, walking, hydration, or flexible movement based on heat, humidity, wind, and rain risk.
-- Added a better exercise guide support layer with setup/move/check form snapshots.
+Two optional features contact external services:
 
-### 0.8.6-style food logging upgrade
+- Weather sends the latitude and longitude entered in Settings to Open-Meteo.
+- Online packaged-food search sends the entered search terms to Open Food Facts.
 
-- Added a Food database search card.
-- Searches the built-in starter food database, My Foods, and optional online packaged-food results.
-- Added serving multiplier and meal target for faster real-world logging.
-- Added optional Open Food Facts packaged-food search when online.
-- Added Save-to-My-Foods from database results.
+Pathfinder does not send meal history, weight history, exercise history, routine history, check-ins, or notes to those services.
+
+## Data safety
+
+Pathfinder currently saves the application state to:
+
+- Primary localStorage
+- Backup localStorage
+- Session-storage refresh fallback
+- IndexedDB mirror
+
+Download a JSON backup weekly, before an update, and before switching browsers or devices.
 
 ## Run locally
 
-From this folder:
+From the repository folder:
 
 ```bash
 python -m http.server 5173
@@ -50,12 +57,10 @@ Then open:
 http://localhost:5173
 ```
 
-You can also double-click `index.html` for a quick look, but serving locally is better for PWA/offline behavior.
+## Deployment
 
-## GitHub Pages update
+The app is a static GitHub Pages site. The repo root contains the live application files.
 
-Upload the contents of this folder into the root of your repo so the repo contains `index.html`, `app.js`, `styles.css`, `manifest.webmanifest`, `service-worker.js`, and `icon.svg` directly.
+## Roadmap
 
-## Data note
-
-This version is still local-first. Nothing syncs between devices until cloud sync is built in 0.9. Use Export backup before replacing files or switching devices.
+See `ROADMAP.md`. The project direction through 2.0 is to strengthen and deepen the existing app rather than add more top-level features.

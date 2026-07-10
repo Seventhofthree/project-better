@@ -1,125 +1,113 @@
-# Pathfinder Release Roadmap
+# Pathfinder Roadmap: 1.0 to 2.0
 
-## Current baseline: 0.8.6
+## North star
 
-Status: Working static local-first prototype.
+Pathfinder should become deeper, calmer, and more useful rather than wider.
 
-Already present:
-- Today dashboard
-- 3-meal rice-plan structure
-- Food logging
-- My Foods and saved meals
-- Open Food Facts packaged-food search
-- Beginner exercise guide
-- Workout logging
-- Daily routines
-- Assistant-style daily/weekly summaries
-- Progress charts
-- History table
-- JSON backup/restore
-- CSV export
-- Weather snippet
-- PWA/offline shell
+Target navigation:
 
-Main risk:
-- Storage exists, but startup and render flow need to be made safer.
+```text
+Today
+Food
+Movement
+Progress
+Settings
+```
 
-## 0.8.7 Stability Update
+No new capability automatically earns a top-level tab. New depth should appear inside the four main sections or only when context makes it relevant.
 
-Goal: stop old-cache and startup-restore issues from hiding or overwriting saved state.
+## 1.0.1 — Correctness and Safety
 
-Scope:
-- Bootstrap restore before `app.js` starts.
-- localStorage primary + backup recovery.
-- IndexedDB mirror recovery before first render.
-- Service worker cache bump.
-- Network-first update strategy for app files.
-- Old Pathfinder cache cleanup.
+Fix the known 1.0 correctness, privacy, import, CSV, documentation, and blank-record issues without redesigning storage.
 
-Included in this zip:
-- `index.html`
-- `persistence-bootstrap.js`
-- `service-worker.js`
-- `RELEASE_NOTES_0.8.7.md`
-- `docs/ROADMAP.md`
+Status: current maintenance release.
 
-## 0.8.8 Data Safety Cleanup
+## 1.1 — Durable Data Foundation
 
-Goal: fix the remaining save-risk inside the app core.
+- Snapshot meal nutrition when logged
+- Snapshot or version routine and workout definitions
+- Keep historical meaning immutable
+- Validate and migrate storage candidates one at a time
+- Fall back to healthy backups
+- Add rotating last-known-good backups
+- Store daily records separately in IndexedDB
+- Debounce text saves
+- Preserve complete import/export
+- Split the large app source into native modules
+- Add automated storage, migration, calculation, and rendering tests
 
-Planned:
-- Change `getDay()` so it does not automatically save when merely viewing a date.
-- Add `peekDay()` for read-only history/review/progress views.
-- Make History and Review stop creating blank day records.
-- Add a visible storage diagnostics card showing:
-  - primary localStorage age
-  - backup localStorage age
-  - IndexedDB mirror age
-  - bootstrap restore source
-- Add a manual "Repair from backup" button.
-- Add a "Download backup before update" reminder.
+## 1.2 — Calm Navigation
 
-## 0.8.9 Code Organization
+Consolidate eleven tabs into:
 
-Goal: make the app easier to maintain without jumping frameworks yet.
+- Today
+- Food
+- Movement
+- Progress
+- Settings
 
-Planned:
-- Split the large `app.js` into smaller files:
-  - storage
-  - state/migrations
-  - food/meals
-  - exercise
-  - routines
-  - assistant summaries
-  - rendering
-  - event handling
-  - weather
-- Keep the same static/no-server deployment model.
-- Keep GitHub Pages compatibility.
+Existing features remain available as nested views.
 
-## 0.9 Data Foundation
+## 1.3 — Today-First Daily Flow
 
-Goal: move from one giant saved JSON blob to a safer local data model.
+Make Today the main operating screen with time-aware morning, afternoon, and evening guidance. Most normal days should be completed without leaving Today.
 
-Planned:
-- Store daily records separately in IndexedDB.
-- Keep localStorage only for small settings and emergency pointers.
-- Add data migrations with version numbers.
-- Add import/export that can restore all records.
-- Add a simple data integrity check.
-- Prepare for future cloud sync without requiring it yet.
+## 1.4 — Food Depth
 
-## 0.9.5 Calorie Counter Upgrade
+Strengthen today’s food logging, meal plans, serving sizes, recent foods, favorites, partial meals, swaps, and nutrition-source labels.
 
-Goal: make food tracking more useful and less manual.
+## 1.5 — Movement Depth
 
-Planned:
-- Better serving sizes.
-- Meal templates.
-- Repeating meals.
-- Quick-add common foods.
-- Daily calorie/protein/fiber summary.
-- Better "ate something else" flow.
-- Separate planned calories from logged calories.
+Combine today’s workout, exercise guidance, plan progression, quiet alternatives, recovery logic, and explainable recommendations.
 
-## 1.0 Personal Daily Companion
+## 1.6 — Progress and Review Depth
 
-Goal: reliable daily use on phone, PC, and tablet.
+Strengthen trend views, historical detail, daily and weekly reviews, confidence labels, comparisons, and grounded recommendations.
 
-Target features:
-- Stable local-first daily tracking.
-- Reliable history and backup/restore.
-- Meal, calorie, protein, and fiber tracking.
-- Workout and routine tracking.
-- Weight trend and weekly direction.
-- Morning brief.
-- Evening wind-down.
-- Saturday weekly review.
-- Offline-first behavior.
-- Clear update process.
+## 1.7 — Personalization Without Clutter
 
-Not included in 1.0 unless specifically chosen:
-- Cloud sync
-- Google Fit integration
-- Account login
-- Multi-user support
+Add schedule, priority, tone, display, and card-order preferences without adding primary navigation.
+
+## 1.8 — Accessibility and PWA Hardening
+
+Improve labels, focus behavior, keyboard support, reduced motion, screen-reader support, icons, offline fallback, caching, and update behavior.
+
+## 1.9 — 2.0 Release Candidate
+
+Freeze visible features and run full regression, migration, long-history, recovery, accessibility, offline, phone, tablet, and desktop testing.
+
+## 2.0 — Integrated Companion
+
+Pathfinder 2.0 should answer four questions:
+
+```text
+Today: What matters now?
+Food: What have I eaten, and what is next?
+Movement: What should I do today?
+Progress: What direction am I moving?
+```
+
+Core requirements:
+
+- Four-section navigation
+- Today-first operation
+- Immutable historical meaning
+- Durable local database
+- Reliable backup and recovery
+- Fast logging
+- Explainable recommendations
+- Strong offline behavior
+- Accessible interaction
+- Automated regression coverage
+- Clear privacy boundaries
+- No account requirement
+
+## Deliberately excluded before 2.0
+
+- Additional primary tabs
+- Social feeds
+- Public profiles
+- Competitive leaderboards
+- Account requirement
+- Medical diagnosis
+- Integrations before the data foundation is ready

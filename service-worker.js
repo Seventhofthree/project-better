@@ -1,10 +1,9 @@
-const CACHE_NAME = 'pathfinder-1.0';
+const CACHE_NAME = 'pathfinder-1.0.1';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
-  './persistence-bootstrap.js',
   './manifest.webmanifest',
   './icon.svg'
 ];

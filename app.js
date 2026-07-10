@@ -1,13 +1,16 @@
-/* Pathfinder 1.0
+/* Pathfinder 1.0.1
    Local-first daily companion app. No account, no server, no dependencies.
-   1.0 is the first Stable Pathfinder release, promoted from the passed 0.9.9 Release Candidate.
-   Keeps the proven local-first save system, mobile polish, assistant layer, and render fallback.
+   1.0.1 is the Correctness and Safety maintenance release built from Pathfinder 1.0 Stable.
+   Fixes audit findings without redesigning the storage model or changing the daily workflow.
 */
 
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.0.1';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
+const PRE_IMPORT_BACKUP_KEY = 'pathfinder.state.v8.pre-import';
+const MAX_IMPORT_BYTES = 4 * 1024 * 1024;
+const BLOCKED_STATE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const IDB_DB_NAME = 'pathfinder-local-state';
 const IDB_STORE_NAME = 'state';
 const IDB_STATE_KEY = 'main';
@@ -396,16 +399,16 @@ function defaultState() {
     version: APP_VERSION,
     meta: { createdAt: new Date().toISOString(), updatedAt: '' },
     settings: {
-      name: 'Joshua',
-      startingWeight: 305,
-      goalWeight: 250,
-      sex: 'male',
-      age: 41,
-      heightFeet: 5,
-      heightInches: 8,
+      name: '',
+      startingWeight: '',
+      goalWeight: '',
+      sex: '',
+      age: '',
+      heightFeet: '',
+      heightInches: '',
       activityLevel: 'sedentary',
-      calorieGoal: 1500,
-      maintenanceCalories: 2600,
+      calorieGoal: 2000,
+      maintenanceCalories: 2000,
       waterGoal: 8,
       exerciseWindow: 'Between lunch and dinner',
       bedtimeBufferHours: 2,
@@ -415,10 +418,10 @@ function defaultState() {
       windDown: true,
       assistantTone: 'friendly',
       compactMode: false,
-      weatherEnabled: true,
-      weatherLocation: 'Muskogee, OK',
-      weatherLatitude: 35.7479,
-      weatherLongitude: -95.3697,
+      weatherEnabled: false,
+      weatherLocation: '',
+      weatherLatitude: '',
+      weatherLongitude: '',
       foodSearch: '',
       lastSaveTestAt: '',
       lastSaveTestResult: ''
@@ -481,6 +484,7 @@ function mergeDefaults(base, incoming) {
   if (!incoming || typeof incoming !== 'object') return base;
   const output = Array.isArray(base) ? [...base] : { ...base };
   Object.keys(incoming).forEach(key => {
+    if (BLOCKED_STATE_KEYS.has(key)) return;
     if (incoming[key] && typeof incoming[key] === 'object' && !Array.isArray(incoming[key])) {
       output[key] = mergeDefaults(base[key] || {}, incoming[key]);
     } else {
@@ -522,6 +526,7 @@ function parseStateCandidate(raw, source) {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
+    assertSafeStateKeys(parsed);
     return { raw, parsed, source, updatedAt: candidateDateValue(parsed), hasUserData: stateHasUserData(parsed) };
   } catch {
     return null;
@@ -808,20 +813,27 @@ function plannedMealCount(day) { return MEAL_KEYS.filter(key => mealPlanned(day,
 function mealLogCount(day) { return MEAL_KEYS.filter(key => mealLogged(day, key)).length; }
 function mealLogComplete(day) { return MEAL_KEYS.every(key => mealLogged(day, key)); }
 
-function loggedMealCalories(day) {
-  const plan = getPlan();
-  return MEAL_KEYS.reduce((sum, key) => sum + (mealPlanned(day, key) ? Number(plan.meals[key]?.calories || 0) : 0), 0);
+function selectedSwapForMeal(day, key) {
+  const id = day.meals?.swaps?.[key];
+  return id ? appState.data.swaps.find(item => item.id === id) || null : null;
 }
 
-function loggedMealProtein(day) {
+function loggedMealNutrient(day, nutrient) {
   const plan = getPlan();
-  return MEAL_KEYS.reduce((sum, key) => sum + (mealPlanned(day, key) ? Number(plan.meals[key]?.protein || 0) : 0), 0);
+  return MEAL_KEYS.reduce((sum, key) => {
+    if (mealPlanned(day, key)) return sum + Number(plan.meals[key]?.[nutrient] || 0);
+    if (mealSwapped(day, key)) {
+      const swap = selectedSwapForMeal(day, key);
+      if (!swap) return sum;
+      return sum + Number(plan.meals[key]?.[nutrient] || 0) + Number(swap[nutrient] || 0);
+    }
+    return sum;
+  }, 0);
 }
 
-function loggedMealFiber(day) {
-  const plan = getPlan();
-  return MEAL_KEYS.reduce((sum, key) => sum + (mealPlanned(day, key) ? Number(plan.meals[key]?.fiber || 0) : 0), 0);
-}
+function loggedMealCalories(day) { return loggedMealNutrient(day, 'calories'); }
+function loggedMealProtein(day) { return loggedMealNutrient(day, 'protein'); }
+function loggedMealFiber(day) { return loggedMealNutrient(day, 'fiber'); }
 
 function customCalories(day) { return day.meals.customItems.reduce((sum, item) => sum + Number(item.calories || 0), 0); }
 function customProtein(day) { return day.meals.customItems.reduce((sum, item) => sum + Number(item.protein || 0), 0); }
@@ -863,7 +875,7 @@ function tdeeEstimate(weightOverride = null) {
   const totalInches = feet * 12 + inches;
   const factors = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725 };
   const factor = factors[settings.activityLevel] || factors.sedentary;
-  if (!weightLb || !age || !totalInches) {
+  if (!weightLb || !age || !totalInches || !['male', 'female'].includes(settings.sex)) {
     return { bmr: 0, tdee: Number(settings.maintenanceCalories || 0), factor, source: 'manual fallback' };
   }
   const kg = weightLb * 0.45359237;
@@ -958,7 +970,9 @@ function releaseReadinessCardHtml() {
   const activeTabOk = APP_TABS.includes(appState.activeTab);
   const dateOk = validDateKey(appState.selectedDate);
   const saveReady = !storageLastError;
-  const overallReady = activeTabOk && dateOk && saveReady;
+  const primaryReady = Boolean(primary.exists);
+  const backupReady = Boolean(backup.exists);
+  const overallReady = activeTabOk && dateOk && saveReady && primaryReady && backupReady;
   return `<div class="card">
     <div class="card-title">
       <div>
@@ -968,12 +982,12 @@ function releaseReadinessCardHtml() {
       <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '1.0' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
+      <li><span>${APP_VERSION === '1.0.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
-      <li><span>${primary.valid ? '✓' : '○'}</span><span>Primary local save: ${escapeHtml(primary.valid ? 'readable' : primary.reason || 'not readable')}</span></li>
-      <li><span>${backup.valid ? '✓' : '○'}</span><span>Backup local save: ${escapeHtml(backup.valid ? 'readable' : backup.reason || 'not readable')}</span></li>
+      <li><span>${primaryReady ? '✓' : '○'}</span><span>Primary local save: ${escapeHtml(primaryReady ? 'readable' : 'not found')}</span></li>
+      <li><span>${backupReady ? '✓' : '○'}</span><span>Backup local save: ${escapeHtml(backupReady ? 'readable' : 'not found')}</span></li>
     </ul>
     <p class="note">This card is read-only. It does not repair or overwrite saved data.</p>
   </div>`;
@@ -1010,22 +1024,22 @@ function renderTabFallback(error) {
   console.error('Pathfinder render fallback:', error);
 }
 
-function stableReleaseCardHtml() {
+function maintenanceReleaseCardHtml() {
   return `<div class="card highlight">
     <div class="card-title">
       <div>
-        <h3>Pathfinder 1.0 Stable</h3>
-        <p>The first stable Pathfinder release: local-first, practical, and ready for daily use.</p>
+        <h3>Pathfinder 1.0.1 Correctness &amp; Safety</h3>
+        <p>A focused maintenance patch addressing the findings from the full 1.0 code audit.</p>
       </div>
-      <span class="badge blue">Stable</span>
+      <span class="badge blue">Maintenance</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>✓</span><span>Promoted from the fully passed 0.9.9 Release Candidate.</span></li>
-      <li><span>✓</span><span>Settings hotfix and release-readiness checks retained.</span></li>
-      <li><span>✓</span><span>Render fallback retained for safer tab display.</span></li>
-      <li><span>✓</span><span>Local-first storage, backup, mobile, and assistant features retained.</span></li>
+      <li><span>✓</span><span>Nutrition, plan recalculation, and blank-day behavior corrected.</span></li>
+      <li><span>✓</span><span>Save diagnostics and import safety strengthened.</span></li>
+      <li><span>✓</span><span>Privacy wording and public defaults corrected.</span></li>
+      <li><span>✓</span><span>Storage architecture intentionally unchanged until 1.1.</span></li>
     </ul>
-    <p class="note">Pathfinder 1.0 keeps the tested 0.9.9 behavior. Future work should build on this stable baseline instead of changing the save system casually.</p>
+    <p class="note">1.0.1 fixes current correctness issues. The durable data-foundation redesign remains scheduled for 1.1.</p>
   </div>`;
 }
 
@@ -2700,7 +2714,8 @@ function storageDiagnostics() {
   return [
     storageCandidateSummary('localStorage primary', safeLocalGet(STORAGE_KEY)),
     storageCandidateSummary('localStorage backup', safeLocalGet(STORAGE_BACKUP_KEY)),
-    storageCandidateSummary('sessionStorage refresh fallback', safeSessionGet(SESSION_STORAGE_KEY))
+    storageCandidateSummary('sessionStorage refresh fallback', safeSessionGet(SESSION_STORAGE_KEY)),
+    storageCandidateSummary('pre-import safety backup', safeLocalGet(PRE_IMPORT_BACKUP_KEY))
   ];
 }
 
@@ -2736,7 +2751,7 @@ function updateSafetyCardHtml() {
   const settings = appState.data.settings || {};
   const release = window.__PATHFINDER_RELEASE__ || {};
   const lastResult = settings.lastSaveTestResult || 'Not run yet';
-  const resultBadge = lastResult.includes('passed') ? '' : lastResult === 'Not run yet' ? 'neutral' : 'warn';
+  const resultBadge = lastResult.startsWith('passed') ? '' : lastResult === 'Not run yet' ? 'neutral' : 'warn';
   return `<div class="card update-safety-card">
     <div class="card-title">
       <div>
@@ -2809,7 +2824,9 @@ async function copyStorageDebugInfo() {
 }
 
 function runSaveTest() {
-  const testKey = 'pathfinder.save-test.v1';
+  const primaryTestKey = 'pathfinder.save-test.primary.v1';
+  const backupTestKey = 'pathfinder.save-test.backup.v1';
+  const sessionTestKey = 'pathfinder.save-test.session.v1';
   const payload = JSON.stringify({
     app: 'Pathfinder',
     version: APP_VERSION,
@@ -2818,31 +2835,45 @@ function runSaveTest() {
   });
 
   const results = [];
+  let primaryPassed = false;
+  let backupPassed = false;
+  let sessionPassed = false;
 
   try {
-    localStorage.setItem(testKey, payload);
-    results.push(localStorage.getItem(testKey) === payload ? 'localStorage passed' : 'localStorage failed verification');
-    localStorage.removeItem(testKey);
+    localStorage.setItem(primaryTestKey, payload);
+    primaryPassed = localStorage.getItem(primaryTestKey) === payload;
+    results.push(primaryPassed ? 'primary localStorage passed' : 'primary localStorage failed verification');
+    localStorage.removeItem(primaryTestKey);
   } catch (error) {
-    results.push(`localStorage failed: ${error.message || error}`);
+    results.push(`primary localStorage failed: ${error.message || error}`);
   }
 
   try {
-    sessionStorage.setItem(testKey, payload);
-    results.push(sessionStorage.getItem(testKey) === payload ? 'sessionStorage passed' : 'sessionStorage failed verification');
-    sessionStorage.removeItem(testKey);
+    localStorage.setItem(backupTestKey, payload);
+    backupPassed = localStorage.getItem(backupTestKey) === payload;
+    results.push(backupPassed ? 'backup localStorage passed' : 'backup localStorage failed verification');
+    localStorage.removeItem(backupTestKey);
+  } catch (error) {
+    results.push(`backup localStorage failed: ${error.message || error}`);
+  }
+
+  try {
+    sessionStorage.setItem(sessionTestKey, payload);
+    sessionPassed = sessionStorage.getItem(sessionTestKey) === payload;
+    results.push(sessionPassed ? 'sessionStorage passed' : 'sessionStorage failed verification');
+    sessionStorage.removeItem(sessionTestKey);
   } catch (error) {
     results.push(`sessionStorage failed: ${error.message || error}`);
   }
 
-  const passed = results.some(result => result.includes('passed'));
+  const durablePassed = primaryPassed && backupPassed;
+  const status = durablePassed ? 'passed' : sessionPassed ? 'degraded' : 'failed';
   appState.data.settings.lastSaveTestAt = new Date().toISOString();
-  appState.data.settings.lastSaveTestResult = passed ? `passed · ${results.join(' · ')}` : `failed · ${results.join(' · ')}`;
+  appState.data.settings.lastSaveTestResult = `${status} · ${results.join(' · ')}`;
   saveState();
   render();
-  showToast(passed ? 'Save test passed' : 'Save test failed');
+  showToast(status === 'passed' ? 'Save test passed' : status === 'degraded' ? 'Save test degraded: export a backup' : 'Save test failed');
 }
-
 
 function appInstallStatus() {
   const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone;
@@ -2945,7 +2976,7 @@ function renderSettings() {
   $('#app').innerHTML = `
     <section class="grid sidebar">
       <div class="card highlight">
-        <div class="card-title"><div><h3>Settings</h3><p>Local-first app data. Nothing leaves this browser unless you export it.</p></div></div>
+        <div class="card-title"><div><h3>Settings</h3><p>Your tracking history stays in this browser. Optional weather and online food searches contact external services using coordinates or search terms.</p></div></div>
         <div class="input-row three">
           ${settingInput('name', 'Name', settings.name, 'text')}
           ${settingInput('startingWeight', 'Starting weight', settings.startingWeight, 'number')}
@@ -2959,7 +2990,7 @@ function renderSettings() {
         <div class="card flat tdee-settings">
           <div class="card-title"><div><h3>TDEE inputs</h3><p>Used for bodyweight expectations and at-this-pace projections.</p></div><span class="badge neutral">${Math.round(tdeeEstimate().tdee || settings.maintenanceCalories || 0)} kcal/day</span></div>
           <div class="input-row three">
-            <div class="input-group"><label>Sex</label><select data-setting-field="sex"><option value="male" ${settings.sex === 'male' ? 'selected' : ''}>Male</option><option value="female" ${settings.sex === 'female' ? 'selected' : ''}>Female</option></select></div>
+            <div class="input-group"><label>Sex used for TDEE estimate</label><select data-setting-field="sex"><option value="" ${!settings.sex ? 'selected' : ''}>Not set</option><option value="male" ${settings.sex === 'male' ? 'selected' : ''}>Male</option><option value="female" ${settings.sex === 'female' ? 'selected' : ''}>Female</option></select></div>
             ${settingInput('age', 'Age', settings.age, 'number')}
             ${settingInput('heightFeet', 'Height feet', settings.heightFeet, 'number')}
             ${settingInput('heightInches', 'Height inches', settings.heightInches, 'number')}
@@ -2976,7 +3007,7 @@ function renderSettings() {
             ${settingInput('weatherLatitude', 'Latitude', settings.weatherLatitude ?? '', 'number')}
             ${settingInput('weatherLongitude', 'Longitude', settings.weatherLongitude ?? '', 'number')}
           </div>
-          <p class="note">Default is Muskogee, OK. Use latitude/longitude for the place Pathfinder should check. Weather uses Open-Meteo when online and quietly falls back when offline.</p>
+          <p class="note">Weather is off on a new installation. When enabled, Pathfinder sends the latitude/longitude entered here to Open-Meteo and quietly falls back when offline.</p>
           <div class="toggle-row"><button class="ghost" data-action="refresh-weather">Refresh weather now</button></div>
         </div>
       </div>
@@ -2985,7 +3016,7 @@ function renderSettings() {
         ${mobileTipsCardHtml()}
         ${updateReadyCardHtml()}
         ${releaseReadinessCardHtml()}
-        ${stableReleaseCardHtml()}
+        ${maintenanceReleaseCardHtml()}
         ${storageDebugCardHtml()}
         <div class="card">
           <h3>Storage status</h3>
@@ -3607,26 +3638,80 @@ function downloadBlob(content, filename, type) {
 
 function csvCell(value) {
   const text = String(value ?? '');
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  const protectedText = typeof value === 'string' && /^[=+\-@]/.test(text.trimStart()) ? `'${text}` : text;
+  return /[",\n]/.test(protectedText) ? `"${protectedText.replaceAll('"', '""')}"` : protectedText;
+}
+
+function assertSafeStateKeys(value, path = 'root') {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertSafeStateKeys(item, `${path}[${index}]`));
+    return;
+  }
+  for (const key of Object.keys(value)) {
+    if (BLOCKED_STATE_KEYS.has(key)) throw new Error(`Unsafe key at ${path}.${key}`);
+    assertSafeStateKeys(value[key], `${path}.${key}`);
+  }
+}
+
+function validateImportedState(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Backup root must be an object');
+  assertSafeStateKeys(parsed);
+  if ('settings' in parsed && (!parsed.settings || typeof parsed.settings !== 'object' || Array.isArray(parsed.settings))) throw new Error('Settings section is invalid');
+  if ('days' in parsed && (!parsed.days || typeof parsed.days !== 'object' || Array.isArray(parsed.days))) throw new Error('Days section is invalid');
+  for (const field of ['foods', 'savedMeals', 'swaps', 'workouts']) {
+    if (field in parsed && !Array.isArray(parsed[field])) throw new Error(`${field} must be a list`);
+  }
+  const days = parsed.days || {};
+  const entries = Object.entries(days);
+  if (entries.length > 5000) throw new Error('Backup contains too many daily records');
+  for (const [key, day] of entries) {
+    if (!validDateKey(key)) throw new Error(`Invalid day key: ${key}`);
+    if (!day || typeof day !== 'object' || Array.isArray(day)) throw new Error(`Invalid day record: ${key}`);
+  }
+  return { dayCount: entries.length };
+}
+
+function preservePreImportBackup() {
+  const payload = JSON.stringify(appState.data, null, 2);
+  try { localStorage.setItem(PRE_IMPORT_BACKUP_KEY, JSON.stringify(appState.data)); }
+  catch (error) { console.warn('Unable to keep pre-import local backup:', error); }
+  downloadBlob(payload, `pathfinder-pre-import-backup-${todayKey()}.json`, 'application/json');
 }
 
 function handleImport(file) {
   if (!file) return;
+  if (file.size > MAX_IMPORT_BYTES) {
+    showToast('Import failed: backup is too large');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = () => {
     try {
       const parsed = JSON.parse(reader.result);
+      const summary = validateImportedState(parsed);
+      const approved = confirm(`Import this Pathfinder backup with ${summary.dayCount} daily record(s)? Your current data will be downloaded and preserved first.`);
+      if (!approved) {
+        showToast('Import cancelled');
+        return;
+      }
+      preservePreImportBackup();
       const merged = mergeDefaults(defaultState(), parsed);
       migrateState(merged);
+      merged.version = APP_VERSION;
       appState.data = merged;
       saveState();
-      showToast('Backup imported');
+      showToast('Backup imported safely');
       render();
     } catch (error) {
       console.error(error);
-      showToast('Import failed');
+      showToast(`Import failed: ${error.message || 'invalid backup'}`);
+    } finally {
+      const input = $('#import-json');
+      if (input) input.value = '';
     }
   };
+  reader.onerror = () => showToast('Import failed: file could not be read');
   reader.readAsText(file);
 }
 
@@ -3669,7 +3754,7 @@ function wireEvents() {
     const setting = target.dataset.settingField;
     if (setting) { appState.data.settings[setting] = numericSetting(setting, target.value); saveState(); render(); return; }
     const planField = target.dataset.planField;
-    if (planField) { appState.data.plan[planField] = planField === 'baseCalories' ? Number(target.value || 0) : target.value; recalcPlanMacros(); saveState(); render(); return; }
+    if (planField) { appState.data.plan[planField] = planField === 'baseCalories' ? Number(target.value || 0) : target.value; recalcPlanMacros(planField !== 'baseCalories'); saveState(); render(); return; }
     const meal = target.dataset.planMeal;
     const mealField = target.dataset.mealField;
     if (meal && mealField) { updatePlanMeal(meal, mealField, target.value); return; }
@@ -3706,12 +3791,12 @@ function focusQuickCheckin() {
 }
 
 function handleAction(action) {
-  const day = getDay();
   switch (action.dataset.action) {
     case 'jump': appState.activeTab = APP_TABS.includes(action.dataset.tabTarget) ? action.dataset.tabTarget : 'today'; render(); break;
     case 'focus-checkin': focusQuickCheckin(); break;
     case 'minimum-win':
     case 'log-exercise-status': {
+      const day = getDay();
       const status = action.dataset.status || 'minimum';
       day.exercise.status = status;
       day.exercise.version = status;
@@ -3719,15 +3804,27 @@ function handleAction(action) {
       if (!day.exercise.minutes) day.exercise.minutes = status === 'full' ? 25 : status === 'minimum' ? 5 : status === 'recovery' ? 5 : '';
       saveState(); render(); showToast(exerciseStatusLabels[status] || 'Movement logged'); break;
     }
-    case 'meal-status': day.meals.statuses[action.dataset.meal] = action.dataset.status; saveState(); render(); break;
+    case 'meal-status': {
+      const day = getDay();
+      day.meals.statuses[action.dataset.meal] = action.dataset.status;
+      saveState(); render(); break;
+    }
     case 'toggle': togglePath(action.dataset.path); break;
-    case 'water': day.checkin.water = Math.max(0, Number(day.checkin.water || 0) + Number(action.dataset.delta || 0)); saveState(); render(); break;
+    case 'water': {
+      const day = getDay();
+      day.checkin.water = Math.max(0, Number(day.checkin.water || 0) + Number(action.dataset.delta || 0));
+      saveState(); render(); break;
+    }
     case 'fill-food-estimate': fillCustomFoodEstimate(action); break;
     case 'log-food-estimate': logFoodEstimate(action); break;
     case 'repeat-food': logFoodEstimate(action); break;
     case 'quick-log-selected-food': quickLogSelectedFood(); break;
     case 'add-custom-food': addCustomFood(); break;
-    case 'remove-custom-food': day.meals.customItems.splice(Number(action.dataset.index), 1); saveState(); render(); break;
+    case 'remove-custom-food': {
+      const day = getDay();
+      day.meals.customItems.splice(Number(action.dataset.index), 1);
+      saveState(); render(); break;
+    }
     case 'quick-add-saved-meal': quickAddSavedMeal(action.dataset.id); break;
     case 'quick-add-food': quickAddFood(action.dataset.id, Number(action.dataset.servings || 1), action.dataset.meal || 'snack'); break;
     case 'add-db-food': addDatabaseFood(action.dataset.id, false); break;
@@ -3739,12 +3836,20 @@ function handleAction(action) {
     case 'add-food-library': addFoodLibrary(); break;
     case 'add-swap': addSwap(); break;
     case 'restore-default-plan': appState.data.plan = structuredClone(defaultMealPlan); saveState(); render(); showToast('Default plan restored'); break;
-    case 'choose-workout': day.exercise.workoutId = action.dataset.id; saveState(); render(); showToast('Workout selected'); break;
+    case 'choose-workout': {
+      const day = getDay();
+      day.exercise.workoutId = action.dataset.id;
+      saveState(); render(); showToast('Workout selected'); break;
+    }
     case 'open-guide': appState.selectedGuideId = action.dataset.guideId || 'chair-sit-to-stand'; appState.activeTab = 'guide'; render(); break;
     case 'add-workout': addWorkout(); break;
     case 'set-setting': appState.data.settings[action.dataset.setting] = numericSetting(action.dataset.setting, action.dataset.value); saveState(); render(); break;
     case 'toggle-setting': appState.data.settings[action.dataset.setting] = !appState.data.settings[action.dataset.setting]; saveState(); render(); break;
-    case 'toggle-routine-item': day.routine.completedIds[action.dataset.id] = !day.routine.completedIds[action.dataset.id]; saveState(); render(); break;
+    case 'toggle-routine-item': {
+      const day = getDay();
+      day.routine.completedIds[action.dataset.id] = !day.routine.completedIds[action.dataset.id];
+      saveState(); render(); break;
+    }
     case 'remove-routine-item': removeRoutineItem(action.dataset.block, action.dataset.id); break;
     case 'add-routine-item': addRoutineItem(); break;
     case 'copy-review': copyWeeklyReview(); break;
@@ -3781,9 +3886,9 @@ function updatePlanMeal(meal, field, value) {
   recalcPlanMacros(); saveState();
 }
 
-function recalcPlanMacros() {
+function recalcPlanMacros(recalculateCalories = true) {
   const plan = appState.data.plan;
-  plan.baseCalories = Number(plan.baseCalories || MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.calories || 0), 0));
+  if (recalculateCalories) plan.baseCalories = MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.calories || 0), 0);
   plan.baseMacros = plan.baseMacros || {};
   plan.baseMacros.protein = MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.protein || 0), 0);
   plan.baseMacros.fiber = MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.fiber || 0), 0);
