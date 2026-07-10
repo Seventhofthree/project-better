@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.9
+/* Pathfinder 1.0
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.9 is a Release Candidate built from the passed 0.9.8.1 Settings Hotfix.
-   Adds final readiness cleanup and render fallback without changing persistence.
+   1.0 is the first Stable Pathfinder release, promoted from the passed 0.9.9 Release Candidate.
+   Keeps the proven local-first save system, mobile polish, assistant layer, and render fallback.
 */
 
-const APP_VERSION = '0.9.9';
+const APP_VERSION = '1.0';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -963,12 +963,12 @@ function releaseReadinessCardHtml() {
     <div class="card-title">
       <div>
         <h3>Release readiness</h3>
-        <p>Quick check for common update problems before calling this a release candidate.</p>
+        <p>Quick check for common update problems on the stable release.</p>
       </div>
       <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '0.9.9' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
+      <li><span>${APP_VERSION === '1.0' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
@@ -1010,22 +1010,22 @@ function renderTabFallback(error) {
   console.error('Pathfinder render fallback:', error);
 }
 
-function releaseCandidateCardHtml() {
+function stableReleaseCardHtml() {
   return `<div class="card highlight">
     <div class="card-title">
       <div>
-        <h3>0.9.9 Release Candidate</h3>
-        <p>This is the last full-app check before calling Pathfinder 1.0 stable.</p>
+        <h3>Pathfinder 1.0 Stable</h3>
+        <p>The first stable Pathfinder release: local-first, practical, and ready for daily use.</p>
       </div>
-      <span class="badge blue">RC</span>
+      <span class="badge blue">Stable</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>✓</span><span>No save-system changes in this release.</span></li>
-      <li><span>✓</span><span>Settings crash from 0.9.8 stayed fixed.</span></li>
-      <li><span>✓</span><span>Render fallback added for safer tab display.</span></li>
-      <li><span>✓</span><span>Root repo cleanup completed before RC build.</span></li>
+      <li><span>✓</span><span>Promoted from the fully passed 0.9.9 Release Candidate.</span></li>
+      <li><span>✓</span><span>Settings hotfix and release-readiness checks retained.</span></li>
+      <li><span>✓</span><span>Render fallback retained for safer tab display.</span></li>
+      <li><span>✓</span><span>Local-first storage, backup, mobile, and assistant features retained.</span></li>
     </ul>
-    <p class="note">Pass this only after checking Today, Meals, Food, Exercise, Routines, Assistant, Progress, Review, History, and Settings.</p>
+    <p class="note">Pathfinder 1.0 keeps the tested 0.9.9 behavior. Future work should build on this stable baseline instead of changing the save system casually.</p>
   </div>`;
 }
 
@@ -2985,7 +2985,7 @@ function renderSettings() {
         ${mobileTipsCardHtml()}
         ${updateReadyCardHtml()}
         ${releaseReadinessCardHtml()}
-        ${releaseCandidateCardHtml()}
+        ${stableReleaseCardHtml()}
         ${storageDebugCardHtml()}
         <div class="card">
           <h3>Storage status</h3>

@@ -1,12 +1,12 @@
 (() => {
-  const RELEASE_LABEL = '0.9.9 Release Candidate';
-  const APP_SCRIPT = './app.js?v=0.9.9';
+  const RELEASE_LABEL = '1.0 Stable Pathfinder';
+  const APP_SCRIPT = './app.js?v=1.0';
 
   window.__PATHFINDER_RELEASE__ = {
     release: RELEASE_LABEL,
     bootstrapVersion: 'removed/inert fallback',
-    coreAppVersion: '0.9.9',
-    serviceWorkerCache: 'pathfinder-0.9.9'
+    coreAppVersion: '1.0',
+    serviceWorkerCache: 'pathfinder-1.0'
   };
 
   function setLoadingMessage(message) {
@@ -30,7 +30,7 @@
     if (!('caches' in window)) return;
     try {
       const keys = await caches.keys();
-      await Promise.all(keys.filter(key => key.startsWith('pathfinder-') && key !== 'pathfinder-0.9.9').map(key => caches.delete(key)));
+      await Promise.all(keys.filter(key => key.startsWith('pathfinder-') && key !== 'pathfinder-1.0').map(key => caches.delete(key)));
     } catch {}
   }
 
