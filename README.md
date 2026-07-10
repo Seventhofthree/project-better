@@ -1,35 +1,46 @@
-# Pathfinder 1.1
+# Pathfinder 1.2
 
 Pathfinder is a local-first daily companion for food, movement, routines, progress, and review.
 
 ## Current release
 
-**1.1 — Durable Data Foundation**
+**1.2 — Calm Navigation**
 
-This release strengthens the app underneath the existing interface. It does not add another top-level feature or tab.
+This release reduces eleven visible feature tabs to five clear destinations without removing any existing capability:
 
-### What changed
+```text
+Today
+Food
+Movement
+Progress
+Settings
+```
 
-- Daily records are stored as separate IndexedDB records rather than rewriting the entire history on every edit.
-- The plan/settings shell is stored separately from daily records.
-- Logged meals preserve nutrition and meal-plan snapshots.
-- Routine completion preserves the routine definition used for that day.
-- Logged workouts preserve the selected workout definition.
-- Saved candidates are validated and migrated one at a time.
-- A damaged primary record can fall through to a healthy last-known-good backup.
-- Up to three recovery backups rotate automatically.
-- Text-entry saves are debounced, while page exit and visibility changes request an immediate flush.
-- JSON import/export still contains the complete Pathfinder state.
-- Storage, historical snapshots, and built-in catalogs now live in separate native JavaScript modules.
-- Automated tests cover snapshots, separated day storage, backup rotation, save verification, 1.0.1 migration, startup, and key historical rendering paths.
+### Where everything moved
 
-## Migration from 1.0.1
+- **Today** contains the daily dashboard, Routines, and Assistant.
+- **Food** contains Today’s Food plus the meal plan, saved foods, swaps, and food search.
+- **Movement** contains Today’s Workout and the Exercise Guide.
+- **Progress** contains Overview, Reviews, and History.
+- **Settings** remains separate for personal targets, backups, diagnostics, and maintenance.
 
-The first 1.1 launch reads the existing 1.0.1 save, validates it, freezes historical definitions, writes the new IndexedDB foundation, and creates a last-known-good backup.
+Each section has a small nested view switcher. Existing internal jump buttons still open the correct nested destination.
 
-Records created before 1.1 did not contain snapshots. Pathfinder cannot reconstruct definitions that were already changed in the past, so legacy records are frozen using the meal plan, routine mode, swaps, and workouts available during the 1.1 migration. New 1.1 records preserve the definitions present when they are logged.
+On phone-sized screens, the five primary destinations move to a compact bottom navigation bar. Desktop keeps the primary navigation near the top.
 
-The old 1.0.1 localStorage save is retained as a rollback copy. It is not updated by normal 1.1 logging. Export a current 1.1 JSON backup before rolling back.
+## Data foundation
+
+Pathfinder 1.2 keeps the passed 1.1 durable data foundation unchanged:
+
+- Separate IndexedDB daily records
+- Immutable meal, routine, and workout snapshots
+- Up to three rotating last-known-good backups
+- Compact emergency metadata in localStorage
+- The unchanged 1.0.1 localStorage rollback copy
+- Debounced text-entry saves
+- Complete JSON import and export
+
+There is no 1.2 data-schema migration. Existing 1.1 data should open unchanged.
 
 ## Privacy
 
@@ -43,14 +54,6 @@ Two optional features contact external services:
 Pathfinder does not send meal history, weight history, exercise history, routine history, check-ins, or notes to those services.
 
 ## Data safety
-
-Pathfinder 1.1 uses:
-
-- IndexedDB application shell
-- Separate IndexedDB daily records
-- Up to three rotating last-known-good IndexedDB backups
-- Compact emergency metadata in localStorage
-- The unchanged 1.0.1 localStorage rollback copy
 
 A JSON export remains the portable backup. Download one weekly, before an update, before changing browsers or devices, and before a rollback.
 
@@ -84,10 +87,12 @@ Or run syntax checks and all tests:
 npm run check
 ```
 
+The test suite covers the 1.1 storage foundation, historical snapshots, legacy migration, startup rendering, and the complete 1.2 navigation map.
+
 ## Deployment
 
 The app is a static GitHub Pages site. The repo root contains the live application files.
 
 ## Roadmap
 
-See `ROADMAP.md`. Pathfinder 1.2 is the calm-navigation release that consolidates the eleven visible tabs into four main sections plus Settings.
+See `ROADMAP.md`. Pathfinder 1.3 is the Today-first daily-flow release.

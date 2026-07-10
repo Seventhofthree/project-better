@@ -7,7 +7,7 @@
   <title>Pathfinder</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=1.1" />
+  <link rel="stylesheet" href="styles.css?v=1.2" />
 </head>
 <body>
   <div class="app-shell">
@@ -24,24 +24,18 @@
       </div>
     </header>
 
-    <nav class="tabs" aria-label="Main navigation">
-      <button data-tab="today" class="active">Today</button>
-      <button data-tab="meals">Meals</button>
-      <button data-tab="food">Food</button>
-      <button data-tab="exercise">Exercise</button>
-      <button data-tab="guide">Guide</button>
-      <button data-tab="routines">Routines</button>
-      <button data-tab="assistant">Assistant</button>
-      <button data-tab="progress">Progress</button>
-      <button data-tab="review">Review</button>
-      <button data-tab="history">History</button>
-      <button data-tab="settings">Settings</button>
+    <nav class="tabs primary-tabs" aria-label="Primary navigation">
+      <button data-section="today" class="active">Today</button>
+      <button data-section="food">Food</button>
+      <button data-section="movement">Movement</button>
+      <button data-section="progress">Progress</button>
+      <button data-section="settings" aria-label="Settings" title="Settings"><span aria-hidden="true">⚙</span><span class="settings-label">Settings</span></button>
     </nav>
 
     <main id="app" tabindex="-1">
       <section class="card highlight">
         <h2>Loading Pathfinder…</h2>
-        <p>Starting Pathfinder 1.1 durable data foundation.</p>
+        <p>Starting Pathfinder 1.2 calm navigation.</p>
       </section>
     </main>
   </div>
@@ -52,12 +46,12 @@
 
   <script>
     window.__PATHFINDER_RELEASE__ = {
-      release: '1.1 Durable Data Foundation',
+      release: '1.2 Calm Navigation',
       bootstrapVersion: 'removed',
-      coreAppVersion: '1.1',
-      serviceWorkerCache: 'pathfinder-1.1'
+      coreAppVersion: '1.2',
+      serviceWorkerCache: 'pathfinder-1.2'
     };
   </script>
-  <script type="module" src="app.js?v=1.1"></script>
+  <script type="module" src="app.js?v=1.2"></script>
 </body>
 </html>

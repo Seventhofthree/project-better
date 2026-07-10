@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeIndexedDb, installFakeLocalStorage } from './fake-indexeddb.mjs';
 
-test('a 1.0.1 localStorage state migrates into the 1.1 foundation with frozen history', async () => {
+test('a 1.0.1 localStorage state migrates into the durable foundation and opens in 1.2 with frozen history', async () => {
   installFakeIndexedDb();
   installFakeLocalStorage();
   const sessionValues = new Map();
@@ -52,6 +52,7 @@ test('a 1.0.1 localStorage state migrates into the 1.1 foundation with frozen hi
     constructor(id = '') { this.id = id; this.value = ''; this.innerHTML = ''; this.textContent = ''; this.classList = new FakeClassList(); this.style = {}; }
     addEventListener() {}
     appendChild() {}
+    insertAdjacentHTML(position, html) { this.innerHTML = position === 'afterbegin' ? String(html) + this.innerHTML : this.innerHTML + String(html); }
     remove() {}
     click() {}
     focus() {}
@@ -77,7 +78,7 @@ test('a 1.0.1 localStorage state migrates into the 1.1 foundation with frozen hi
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.1 Durable Data Foundation', coreAppVersion: '1.1', serviceWorkerCache: 'pathfinder-1.1' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.2 Calm Navigation', coreAppVersion: '1.2', serviceWorkerCache: 'pathfinder-1.2' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -93,7 +94,7 @@ test('a 1.0.1 localStorage state migrates into the 1.1 foundation with frozen hi
   const primary = candidates.find(candidate => candidate.source === 'IndexedDB primary');
   assert.ok(primary);
   assert.equal(primary.state.settings.name, 'Migration Test');
-  assert.equal(primary.state.version, '1.1');
+  assert.equal(primary.state.version, '1.2');
   assert.equal(primary.state.schemaVersion, 2);
   const migratedDay = primary.state.days['2026-07-09'];
   assert.equal(migratedDay.meals.snapshots.breakfast.calories, 410);

@@ -36,7 +36,7 @@ Fix the known 1.0 correctness, privacy, import, CSV, documentation, and blank-re
 - Split storage and history logic into native modules
 - Add automated storage, migration, calculation, startup, and rendering tests
 
-**Status: current release under user verification.**
+**Status: completed and passed.**
 
 ## 1.2 — Calm Navigation
 
@@ -50,9 +50,11 @@ Consolidate eleven tabs into:
 
 Existing features remain available as nested views.
 
-**Status: next.**
+**Status: current release under user verification.**
 
 ## 1.3 — Today-First Daily Flow
+
+**Status: next.**
 
 Make Today the main operating screen with time-aware morning, afternoon, and evening guidance. Most normal days should be completed without leaving Today.
 

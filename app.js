@@ -1,7 +1,7 @@
-/* Pathfinder 1.1
-   Durable Data Foundation release.
-   Daily records are stored separately in IndexedDB with historical snapshots,
-   validated fallback recovery, rotating last-known-good backups, and debounced saves.
+/* Pathfinder 1.2
+   Calm Navigation release built on the passed 1.1 durable data foundation.
+   Eleven feature tabs are consolidated into five primary destinations while
+   preserving every existing view as a nested destination.
 */
 
 import {
@@ -41,7 +41,15 @@ import {
   defaultRoutines
 } from './app-catalog.js';
 
-const APP_VERSION = '1.1';
+import {
+  VIEW_IDS as APP_TABS,
+  PRIMARY_SECTIONS,
+  defaultViewForSection,
+  sectionDefinition,
+  sectionForView
+} from './navigation.js';
+
+const APP_VERSION = '1.2';
 const APP_DATA_SCHEMA_VERSION = 2;
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
@@ -57,7 +65,6 @@ let dirtyDayKeys = new Set();
 let migrationDirtyDayKeys = new Set();
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'];
 const ROUTINE_BLOCKS = ['morning', 'betweenLunchDinner', 'evening'];
-const APP_TABS = ['today', 'meals', 'food', 'exercise', 'guide', 'routines', 'assistant', 'progress', 'review', 'history', 'settings'];
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 const todayKey = () => toDateKey(new Date());
@@ -778,7 +785,7 @@ function releaseReadinessCardHtml() {
       <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '1.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)} · data schema ${APP_DATA_SCHEMA_VERSION}</span></li>
+      <li><span>${APP_VERSION === '1.2' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)} · data schema ${APP_DATA_SCHEMA_VERSION}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
@@ -846,8 +853,28 @@ function maintenanceReleaseCardHtml() {
       <li><span>✓</span><span>Up to three last-known-good backups rotate automatically.</span></li>
       <li><span>✓</span><span>Text saves are debounced while important exits flush immediately.</span></li>
     </ul>
-    <p class="note">Legacy 1.0.1 history is frozen using the plan and routine definitions available during migration. New 1.1 logs preserve their exact definitions when recorded.</p>
+    <p class="note">Legacy 1.0.1 history is frozen using the plan and routine definitions available during migration. Records logged on the durable foundation preserve their exact definitions when recorded.</p>
   </div>`;
+}
+
+function sectionNavigationHtml(section) {
+  const definition = sectionDefinition(section);
+  if (!definition || definition.views.length <= 1) return '';
+  return `<section class="section-navigation" aria-label="${escapeHtml(definition.label)} section navigation">
+    <div class="section-navigation-copy">
+      <span class="section-kicker">Inside ${escapeHtml(definition.label)}</span>
+      <small>${escapeHtml(definition.description)}</small>
+    </div>
+    <div class="segmented section-view-tabs" role="tablist">
+      ${definition.views.map(view => `<button type="button" role="tab" data-tab="${escapeHtml(view.id)}" class="${appState.activeTab === view.id ? 'active' : ''}" aria-selected="${appState.activeTab === view.id ? 'true' : 'false'}">${escapeHtml(view.label)}</button>`).join('')}
+    </div>
+  </section>`;
+}
+
+function insertSectionNavigation(section) {
+  const html = sectionNavigationHtml(section);
+  if (!html) return;
+  $('#app').insertAdjacentHTML('afterbegin', html);
 }
 
 function render() {
@@ -855,11 +882,14 @@ function render() {
   injectMobilePwaStyles();
   applyCompactModeClass();
   $('#date-picker').value = appState.selectedDate;
-  $$('.tabs button').forEach(button => button.classList.toggle('active', button.dataset.tab === appState.activeTab));
+  const activeSection = sectionForView(appState.activeTab);
+  $$('.tabs button').forEach(button => button.classList.toggle('active', button.dataset.section === activeSection));
   const renderers = { today: renderToday, meals: renderMeals, food: renderFood, exercise: renderExercise, guide: renderGuide, routines: renderRoutines, assistant: renderAssistant, progress: renderProgress, review: renderReview, history: renderHistory, settings: renderSettings };
   try {
     const renderer = renderers[appState.activeTab] || renderToday;
     renderer();
+    setTitle(sectionDefinition(activeSection).label);
+    insertSectionNavigation(activeSection);
   } catch (error) {
     renderTabFallback(error);
   }
@@ -2704,6 +2734,13 @@ function injectMobilePwaStyles() {
     button.small, .ghost.small, .secondary.small, .primary.small { min-height: var(--tap-target); padding: 10px 14px; }
     .tabs { scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
     .tabs button { min-height: var(--tap-target); white-space: nowrap; }
+    .section-navigation { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.035); }
+    .section-navigation-copy { display: grid; gap: 3px; min-width: 190px; }
+    .section-navigation-copy small { color: var(--muted); line-height: 1.35; }
+    .section-kicker { color: var(--accent); font-size: .76rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .section-view-tabs { margin: 0; justify-content: flex-end; }
+    .section-view-tabs button { min-height: var(--tap-target); }
+    .primary-tabs .settings-label { margin-left: 4px; }
     .toggle-row.tight { gap: 8px; }
     .companion-card { scroll-margin-top: 90px; }
     body.compact-mode .card { padding: 14px; }
@@ -2711,13 +2748,19 @@ function injectMobilePwaStyles() {
     body.compact-mode .metric { padding: 12px; }
     body.compact-mode .note, body.compact-mode p { line-height: 1.45; }
     @media (max-width: 720px) {
-      body { padding-bottom: env(safe-area-inset-bottom); }
+      body { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
       .app-shell { width: min(100%, 100vw); padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
       .topbar { gap: 12px; align-items: flex-start; }
       .date-controls { width: 100%; display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px 70px; gap: 8px; }
       .date-controls input[type="date"] { min-width: 0; width: 100%; }
-      .tabs { margin-left: -12px; margin-right: -12px; padding: 8px 12px; border-radius: 0; position: sticky; top: 0; z-index: 25; }
-      .tabs button { flex: 0 0 auto; padding: 10px 14px; }
+      .tabs.primary-tabs { position: fixed; inset: auto 0 0 0; z-index: 50; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 54px; gap: 6px; margin: 0; padding: 8px max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid var(--line); background: rgba(16,24,21,.96); backdrop-filter: blur(14px); box-shadow: 0 -12px 34px rgba(0,0,0,.28); }
+      .tabs.primary-tabs button { min-width: 0; padding: 10px 6px; font-size: .82rem; text-align: center; overflow: hidden; text-overflow: ellipsis; }
+      .tabs.primary-tabs .settings-label { display: none; }
+      .toast { bottom: calc(82px + env(safe-area-inset-bottom)); }
+      .section-navigation { display: grid; gap: 10px; padding: 10px 12px; }
+      .section-navigation-copy { min-width: 0; }
+      .section-view-tabs { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; margin: 0; padding-bottom: 2px; }
+      .section-view-tabs button { flex: 0 0 auto; }
       .grid, .grid.two, .grid.three, .grid.four, .grid.sidebar, .grid.wide-sidebar { grid-template-columns: 1fr !important; }
       .input-row, .input-row.two, .input-row.three, .input-row.four { grid-template-columns: 1fr !important; }
       .toggle-row { align-items: stretch; }
@@ -2772,6 +2815,32 @@ function updateReadyCardHtml() {
   </div>`;
 }
 
+function calmNavigationReleaseCardHtml() {
+  const activeSection = sectionForView(appState.activeTab);
+  return `<div class="card highlight">
+    <div class="card-title">
+      <div>
+        <h3>Pathfinder 1.2 Calm Navigation</h3>
+        <p>Eleven visible feature tabs are now organized inside five clear destinations.</p>
+      </div>
+      <span class="badge blue">Calmer layout</span>
+    </div>
+    <div class="grid three">
+      <div class="metric"><span class="value">5</span><span class="label">primary destinations</span><small>down from eleven</small></div>
+      <div class="metric"><span class="value">11</span><span class="label">feature views preserved</span><small>nothing removed</small></div>
+      <div class="metric"><span class="value">${escapeHtml(sectionDefinition(activeSection).label)}</span><span class="label">current section</span><small>nested view: ${escapeHtml(appState.activeTab)}</small></div>
+    </div>
+    <ul class="check-list mini-list" style="margin-top:14px;">
+      <li><span>✓</span><span>Today now contains the dashboard, routines, and Assistant.</span></li>
+      <li><span>✓</span><span>Food contains today’s logging plus the meal plan and food library.</span></li>
+      <li><span>✓</span><span>Movement contains today’s workout and the exercise guide.</span></li>
+      <li><span>✓</span><span>Progress contains overview, reviews, and history.</span></li>
+      <li><span>✓</span><span>Settings remains separate from everyday navigation.</span></li>
+    </ul>
+    <p class="note">The 1.1 IndexedDB foundation, historical snapshots, backups, imports, and exports are unchanged underneath this navigation release.</p>
+  </div>`;
+}
+
 function renderSettings() {
   setTitle('Settings');
   const settings = appState.data.settings;
@@ -2818,6 +2887,7 @@ function renderSettings() {
         ${mobileTipsCardHtml()}
         ${updateReadyCardHtml()}
         ${releaseReadinessCardHtml()}
+        ${calmNavigationReleaseCardHtml()}
         ${maintenanceReleaseCardHtml()}
         ${storageDebugCardHtml()}
         <div class="card">
@@ -3541,6 +3611,13 @@ function greeting() {
 
 function wireEvents() {
   document.addEventListener('click', event => {
+    const sectionButton = event.target.closest('[data-section]');
+    if (sectionButton) {
+      const section = sectionButton.dataset.section;
+      if (PRIMARY_SECTIONS.includes(section)) appState.activeTab = defaultViewForSection(section);
+      render();
+      return;
+    }
     const tabButton = event.target.closest('[data-tab]');
     if (tabButton) { if (APP_TABS.includes(tabButton.dataset.tab)) appState.activeTab = tabButton.dataset.tab; render(); return; }
     const action = event.target.closest('[data-action]');
@@ -3917,7 +3994,7 @@ async function startPathfinder() {
     await hydrateFromDataFoundation();
   } catch (error) {
     storageLastError = error.message || String(error);
-    console.error('Pathfinder 1.1 foundation startup failed; using validated fallback state:', error);
+    console.error('Pathfinder 1.2 foundation startup failed; using validated fallback state:', error);
     appState.data = prepareStateCandidate(appState.data);
   }
   normalizeRuntimeState();

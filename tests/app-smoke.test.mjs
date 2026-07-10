@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeIndexedDb, installFakeLocalStorage } from './fake-indexeddb.mjs';
 
-test('Pathfinder starts, renders Today, and opens Settings with foundation diagnostics', async () => {
+test('Pathfinder 1.2 starts, renders Today, and opens nested sections with foundation diagnostics', async () => {
   installFakeIndexedDb();
   installFakeLocalStorage();
   const sessionValues = new Map();
@@ -24,6 +24,7 @@ test('Pathfinder starts, renders Today, and opens Settings with foundation diagn
     }
     addEventListener() {}
     appendChild() {}
+    insertAdjacentHTML(position, html) { this.innerHTML = position === 'afterbegin' ? String(html) + this.innerHTML : this.innerHTML + String(html); }
     remove() {}
     click() {}
     focus() {}
@@ -50,7 +51,7 @@ test('Pathfinder starts, renders Today, and opens Settings with foundation diagn
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.1 Durable Data Foundation', coreAppVersion: '1.1', serviceWorkerCache: 'pathfinder-1.1' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.2 Calm Navigation', coreAppVersion: '1.2', serviceWorkerCache: 'pathfinder-1.2' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -63,17 +64,32 @@ test('Pathfinder starts, renders Today, and opens Settings with foundation diagn
   await new Promise(resolve => setTimeout(resolve, 160));
 
   assert.match(elements.get('app').innerHTML, /Today needs/);
+  assert.match(elements.get('app').innerHTML, /Inside Today/);
+  assert.match(elements.get('app').innerHTML, /Routines/);
   assert.equal(typeof listeners.click, 'function');
 
   listeners.click({
     target: {
       closest(selector) {
-        if (selector === '[data-tab]') return { dataset: { tab: 'settings' } };
+        if (selector === '[data-section]') return { dataset: { section: 'food' } };
+        return null;
+      }
+    }
+  });
+  assert.match(elements.get('app').innerHTML, /Inside Food/);
+  assert.match(elements.get('app').innerHTML, /Today’s Food/);
+  assert.match(elements.get('app').innerHTML, /logged calories/);
+
+  listeners.click({
+    target: {
+      closest(selector) {
+        if (selector === '[data-section]') return { dataset: { section: 'settings' } };
         return null;
       }
     }
   });
 
+  assert.match(elements.get('app').innerHTML, /Pathfinder 1\.2 Calm Navigation/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.1 Durable Data Foundation/);
   assert.match(elements.get('app').innerHTML, /IndexedDB foundation/);
   assert.match(elements.get('app').innerHTML, /Last-known-good backups/);
