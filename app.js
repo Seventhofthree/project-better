@@ -1,23 +1,60 @@
-/* Pathfinder 1.0.1
-   Local-first daily companion app. No account, no server, no dependencies.
-   1.0.1 is the Correctness and Safety maintenance release built from Pathfinder 1.0 Stable.
-   Fixes audit findings without redesigning the storage model or changing the daily workflow.
+/* Pathfinder 1.1
+   Durable Data Foundation release.
+   Daily records are stored separately in IndexedDB with historical snapshots,
+   validated fallback recovery, rotating last-known-good backups, and debounced saves.
 */
 
-const APP_VERSION = '1.0.1';
+import {
+  FOUNDATION_SCHEMA_VERSION,
+  FOUNDATION_POINTER_KEY,
+  FOUNDATION_EMERGENCY_SHELL_KEY,
+  createFoundationBackup,
+  flushFoundationSave,
+  getFoundationDiagnostics,
+  loadFoundationCandidates,
+  queueFoundationSave,
+  runFoundationSaveTest,
+  validateFoundationState,
+  writeEmergencyMetadata
+} from './data-foundation.js';
+import {
+  HISTORY_SNAPSHOT_VERSION,
+  backfillHistorySnapshots,
+  buildMealSnapshot,
+  buildPlanSnapshot,
+  buildRoutineSnapshot,
+  buildWorkoutSnapshot,
+  mealSnapshotNutrient,
+  routineItemsFromSnapshot
+} from './history-snapshots.js';
+
+import {
+  defaultMealPlan,
+  defaultFoods,
+  localFoodDatabase,
+  defaultSavedMeals,
+  defaultSwaps,
+  workouts,
+  weekdayWorkoutOrder,
+  exerciseGuide,
+  windDownPrompts,
+  defaultRoutines
+} from './app-catalog.js';
+
+const APP_VERSION = '1.1';
+const APP_DATA_SCHEMA_VERSION = 2;
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
 const PRE_IMPORT_BACKUP_KEY = 'pathfinder.state.v8.pre-import';
-const MAX_IMPORT_BYTES = 4 * 1024 * 1024;
+const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
 const BLOCKED_STATE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-const IDB_DB_NAME = 'pathfinder-local-state';
-const IDB_STORE_NAME = 'state';
-const IDB_STATE_KEY = 'main';
-const LEGACY_KEYS = ['pathfinder.state.v8.backup', 'pathfinder.state.v7', 'pathfinder.state.v1', 'pathfinder.0.1.state'];
+const LEGACY_KEYS = ['pathfinder.state.v7', 'pathfinder.state.v1', 'pathfinder.0.1.state'];
 let storageLoadSource = 'default';
 let storageLastError = '';
-let saveTimer = null;
+let foundationDiagnosticsCache = { available: false, primaryExists: false, dayCount: 0, backupCount: 0, newestBackupAt: '', updatedAt: '', emergencyShellExists: false, pointerExists: false };
+let dirtyDayKeys = new Set();
+let migrationDirtyDayKeys = new Set();
 const MEAL_KEYS = ['breakfast', 'lunch', 'dinner'];
 const ROUTINE_BLOCKS = ['morning', 'betweenLunchDinner', 'evening'];
 const APP_TABS = ['today', 'meals', 'food', 'exercise', 'guide', 'routines', 'assistant', 'progress', 'review', 'history', 'settings'];
@@ -40,353 +77,6 @@ const exerciseStatusLabels = {
   missed: 'Missed'
 };
 
-const defaultMealPlan = {
-  planName: '1,500-Calorie Egg Fried Rice Plan',
-  baseCalories: 1480,
-  calorieRange: '1,480–1,500',
-  meals: {
-    breakfast: {
-      label: 'Meal 1 · Breakfast nutrition block',
-      shortLabel: 'Breakfast block',
-      subtitle: 'Lentils, milk, fruit, flax',
-      calories: 440,
-      protein: 30,
-      fiber: 15,
-      items: ['3/4 cup cooked lentils', '1 1/2 cups 1% milk', '1 cup frozen fruit', '1 Tbsp ground flaxseed'],
-      recipe: {
-        prep: '5 minutes',
-        cook: '0–5 minutes if lentils are already cooked',
-        steps: ['Add cooked lentils to a bowl or container.', 'Add milk, frozen fruit, and ground flaxseed.', 'Stir and let it sit a few minutes so the fruit softens, or prep it the night before.', 'Eat cold like a simple breakfast bowl, or warm the lentils separately first if you prefer.'],
-        note: 'This is meant to be fast and repeatable, not fancy.'
-      }
-    },
-    lunch: {
-      label: 'Meal 2 · Lunch egg fried rice bowl',
-      shortLabel: 'Lunch bowl',
-      subtitle: 'Healthier egg fried rice',
-      calories: 520,
-      protein: 28,
-      fiber: 8,
-      items: ['1 1/4 cups cooked jasmine rice', '1 large whole egg', '1/2 cup liquid egg whites', '1 cup riced cauliflower', '1/2 cup pepper/onion blend', '1/2 cup mixed vegetables', '1 tsp oil', 'Garlic powder, pepper, low-sodium soy sauce, or Sriracha'],
-      recipe: {
-        prep: '5–8 minutes if rice is cooked',
-        cook: '8–12 minutes',
-        steps: ['Heat 1 tsp oil in a nonstick pan or wok over medium heat.', 'Cook pepper/onion blend, riced cauliflower, and mixed vegetables until hot and most extra water cooks off.', 'Push vegetables to the side and scramble the egg plus egg whites.', 'Add cooked rice and stir everything together until hot.', 'Season lightly with garlic powder, pepper, low-sodium soy sauce, and Sriracha to taste.'],
-        note: 'Cook the vegetables first so the bowl does not turn watery.'
-      }
-    },
-    dinner: {
-      label: 'Meal 3 · Dinner egg fried rice bowl',
-      shortLabel: 'Dinner bowl',
-      subtitle: 'Same bowl, easy repeat',
-      calories: 520,
-      protein: 28,
-      fiber: 8,
-      items: ['1 1/4 cups cooked jasmine rice', '1 large whole egg', '1/2 cup liquid egg whites', '1 cup riced cauliflower', '1/2 cup pepper/onion blend', '1/2 cup mixed vegetables', '1 tsp oil', 'Garlic powder, pepper, low-sodium soy sauce, or Sriracha'],
-      recipe: {
-        prep: '5–8 minutes if rice is cooked',
-        cook: '8–12 minutes',
-        steps: ['Heat 1 tsp oil in a nonstick pan or wok over medium heat.', 'Cook pepper/onion blend, riced cauliflower, and mixed vegetables until hot and most extra water cooks off.', 'Push vegetables to the side and scramble the egg plus egg whites.', 'Add cooked rice and stir everything together until hot.', 'Season lightly with garlic powder, pepper, low-sodium soy sauce, and Sriracha to taste.'],
-        note: 'Same method as lunch. Keep it boring and easy.'
-      }
-    }
-  },
-  baseMacros: { protein: 86, fat: 31, carbs: 213, fiber: 31 }
-};
-
-const defaultFoods = [
-  { id: 'jasmine-rice', name: 'Cooked jasmine rice', serving: '1 cup cooked', calories: 205, protein: 4, fiber: 1, category: 'Carb base' },
-  { id: 'brown-lentils', name: 'Cooked brown lentils', serving: '1 cup cooked', calories: 230, protein: 18, fiber: 16, category: 'Protein/fiber' },
-  { id: 'black-beans', name: 'Cooked black beans', serving: '1 cup cooked', calories: 227, protein: 15, fiber: 15, category: 'Protein/fiber' },
-  { id: 'egg', name: 'Large egg', serving: '1 egg', calories: 72, protein: 6, fiber: 0, category: 'Protein' },
-  { id: 'egg-whites', name: 'Liquid egg whites', serving: '1/2 cup', calories: 67, protein: 13, fiber: 0, category: 'Protein' },
-  { id: 'riced-cauliflower', name: 'Riced cauliflower', serving: '1 cup', calories: 25, protein: 2, fiber: 2, category: 'Vegetable' },
-  { id: 'pepper-onion', name: 'Pepper/onion blend', serving: '1/2 cup', calories: 35, protein: 1, fiber: 2, category: 'Vegetable' },
-  { id: 'mixed-veggies', name: 'Frozen mixed vegetables', serving: '1 cup', calories: 80, protein: 3, fiber: 5, category: 'Vegetable' },
-  { id: 'one-percent-milk', name: '1% milk', serving: '1 cup', calories: 102, protein: 8, fiber: 0, category: 'Dairy' },
-  { id: 'frozen-fruit', name: 'Frozen fruit', serving: '1 cup', calories: 80, protein: 1, fiber: 3, category: 'Fruit' },
-  { id: 'flaxseed', name: 'Ground flaxseed', serving: '1 Tbsp', calories: 37, protein: 1, fiber: 2, category: 'Add-in' },
-  { id: 'olive-oil', name: 'Olive oil', serving: '1 tsp', calories: 40, protein: 0, fiber: 0, category: 'Fat' },
-  { id: 'greek-yogurt', name: 'Plain Greek yogurt', serving: '3/4 cup', calories: 105, protein: 18, fiber: 0, category: 'Protein' },
-  { id: 'canned-salmon', name: 'Canned salmon', serving: '4 oz', calories: 180, protein: 25, fiber: 0, category: 'Protein' }
-];
-
-const localFoodDatabase = [
-  ...defaultFoods.map(item => ({ ...item, source: 'Pathfinder starter' })),
-  { id: 'db-cooked-white-rice-half', name: 'Cooked white rice', serving: '1/2 cup cooked', calories: 103, protein: 2, fiber: 0.3, category: 'Carb base', source: 'Starter database' },
-  { id: 'db-brown-rice', name: 'Cooked brown rice', serving: '1 cup cooked', calories: 216, protein: 5, fiber: 4, category: 'Carb base', source: 'Starter database' },
-  { id: 'db-oatmeal', name: 'Oatmeal cooked with water', serving: '1 cup cooked', calories: 154, protein: 6, fiber: 4, category: 'Breakfast', source: 'Starter database' },
-  { id: 'db-banana', name: 'Banana', serving: '1 medium', calories: 105, protein: 1, fiber: 3, category: 'Fruit', source: 'Starter database' },
-  { id: 'db-orange', name: 'Orange', serving: '1 medium', calories: 62, protein: 1, fiber: 3, category: 'Fruit', source: 'Starter database' },
-  { id: 'db-apple', name: 'Apple', serving: '1 medium', calories: 95, protein: 0, fiber: 4, category: 'Fruit', source: 'Starter database' },
-  { id: 'db-whole-milk', name: 'Whole milk', serving: '1 cup', calories: 149, protein: 8, fiber: 0, category: 'Dairy', source: 'Starter database' },
-  { id: 'db-skim-milk', name: 'Skim milk', serving: '1 cup', calories: 83, protein: 8, fiber: 0, category: 'Dairy', source: 'Starter database' },
-  { id: 'db-nonfat-greek-yogurt', name: 'Nonfat Greek yogurt', serving: '3/4 cup', calories: 100, protein: 18, fiber: 0, category: 'Protein', source: 'Starter database' },
-  { id: 'db-cottage-cheese', name: 'Low-fat cottage cheese', serving: '1/2 cup', calories: 90, protein: 13, fiber: 0, category: 'Protein', source: 'Starter database' },
-  { id: 'db-chicken-breast', name: 'Chicken breast cooked', serving: '4 oz', calories: 187, protein: 35, fiber: 0, category: 'Protein', source: 'Starter database' },
-  { id: 'db-tuna-water', name: 'Canned tuna in water', serving: '1 can drained', calories: 120, protein: 26, fiber: 0, category: 'Protein', source: 'Starter database' },
-  { id: 'db-salmon-pouch', name: 'Salmon pouch/can', serving: '3 oz', calories: 120, protein: 17, fiber: 0, category: 'Protein', source: 'Starter database' },
-  { id: 'db-ground-turkey', name: 'Ground turkey cooked', serving: '4 oz', calories: 220, protein: 28, fiber: 0, category: 'Protein', source: 'Starter database' },
-  { id: 'db-tofu', name: 'Firm tofu', serving: '1/2 block', calories: 180, protein: 20, fiber: 2, category: 'Protein', source: 'Starter database' },
-  { id: 'db-broccoli', name: 'Broccoli cooked', serving: '1 cup', calories: 55, protein: 4, fiber: 5, category: 'Vegetable', source: 'Starter database' },
-  { id: 'db-green-beans', name: 'Green beans cooked', serving: '1 cup', calories: 44, protein: 2, fiber: 4, category: 'Vegetable', source: 'Starter database' },
-  { id: 'db-carrots', name: 'Carrots cooked', serving: '1 cup', calories: 55, protein: 1, fiber: 5, category: 'Vegetable', source: 'Starter database' },
-  { id: 'db-spinach', name: 'Spinach cooked', serving: '1 cup', calories: 41, protein: 5, fiber: 4, category: 'Vegetable', source: 'Starter database' },
-  { id: 'db-frozen-stir-fry', name: 'Frozen stir-fry vegetables', serving: '1 cup', calories: 60, protein: 2, fiber: 4, category: 'Vegetable', source: 'Starter database' },
-  { id: 'db-avocado', name: 'Avocado', serving: '1/2 medium', calories: 120, protein: 2, fiber: 5, category: 'Fat/fiber', source: 'Starter database' },
-  { id: 'db-peanut-butter', name: 'Peanut butter', serving: '1 Tbsp', calories: 95, protein: 4, fiber: 1, category: 'Fat/protein', source: 'Starter database' },
-  { id: 'db-sesame-oil', name: 'Toasted sesame oil', serving: '1 tsp', calories: 40, protein: 0, fiber: 0, category: 'Fat/flavor', source: 'Starter database' },
-  { id: 'db-soy-sauce-low', name: 'Low-sodium soy sauce', serving: '1 Tbsp', calories: 10, protein: 1, fiber: 0, category: 'Flavor', source: 'Starter database' },
-  { id: 'db-sriracha', name: 'Sriracha', serving: '1 tsp', calories: 5, protein: 0, fiber: 0, category: 'Flavor', source: 'Starter database' },
-  { id: 'db-protein-shake', name: 'Protein shake', serving: '1 scoop mixed with water', calories: 120, protein: 24, fiber: 0, category: 'Protein', source: 'Starter database' },
-  { id: 'db-sub-sandwich', name: 'Deli/turkey sandwich estimate', serving: '1 sandwich', calories: 450, protein: 28, fiber: 4, category: 'Real-world estimate', source: 'Starter database' },
-  { id: 'db-fast-food-burger', name: 'Fast food burger estimate', serving: '1 burger', calories: 550, protein: 25, fiber: 2, category: 'Real-world estimate', source: 'Starter database' },
-  { id: 'db-fried-rice-restaurant', name: 'Restaurant fried rice estimate', serving: '2 cups', calories: 700, protein: 20, fiber: 4, category: 'Real-world estimate', source: 'Starter database' }
-];
-
-const defaultSavedMeals = [
-  { id: 'planned-breakfast', name: 'Breakfast nutrition block', calories: 440, protein: 30, fiber: 15, notes: 'Lentils, 1% milk, fruit, flax.' },
-  { id: 'egg-rice-bowl', name: 'Egg fried rice bowl', calories: 520, protein: 28, fiber: 8, notes: 'Rice, egg, egg whites, riced cauliflower, vegetables, 1 tsp oil.' },
-  { id: 'minimum-protein-backup', name: 'Minimum backup meal', calories: 300, protein: 22, fiber: 4, notes: 'Use when the full plan is not happening. Log it instead of leaving the day blank.' }
-];
-
-const defaultSwaps = [
-  { id: 'extra-fruit', name: 'Extra frozen fruit', calories: 80, protein: 1, fiber: 3, use: 'When hunger is high and you want something easy.' },
-  { id: 'yogurt-protein', name: 'Greek yogurt protein boost', calories: 105, protein: 18, fiber: 0, use: 'When protein looks low.' },
-  { id: 'salmon-boost', name: 'Canned salmon boost', calories: 180, protein: 25, fiber: 0, use: 'Use occasionally, not every day.' },
-  { id: 'rice-reduce', name: 'Reduce rice by 1/2 cup', calories: -100, protein: -2, fiber: 0, use: 'When calories need trimming without changing the whole meal.' }
-];
-
-const workouts = [
-  {
-    id: 'chair-posture', title: 'Chair posture strength', focus: 'posture', level: 1, quiet: true,
-    bestFor: 'Workdays when you need strength without noise.',
-    full: ['Chair sit-to-stand · 3 x 8', 'Wall angels · 3 x 8', 'Counter pushups · 3 x 8', 'Dead bug or heel taps · 2 x 8 each side', 'Easy bike · 8–12 min'],
-    minimum: ['Chair sit-to-stand · 1 x 8', 'Wall angels · 1 x 8', '2 min easy walk'],
-    recovery: ['Wall posture hold · 2 x 20 sec', 'Gentle shoulder rolls · 1 min', 'Slow breathing · 2 min']
-  },
-  {
-    id: 'quiet-cardio', title: 'Quiet cardio + mobility', focus: 'stamina', level: 1, quiet: true,
-    bestFor: 'Low-energy evenings where the bike is the easiest win.',
-    full: ['Easy bike warmup · 5 min', 'Bike steady pace · 15–20 min', 'Standing calf stretch · 2 x 30 sec', 'Hip flexor stretch · 2 x 30 sec', 'Box breathing · 2 min'],
-    minimum: ['Bike or march in place · 5 min', 'One stretch that feels good'],
-    recovery: ['Easy bike · 5 min', 'Calf stretch · 30 sec each side']
-  },
-  {
-    id: 'core-stamina', title: 'Core + stamina builder', focus: 'core', level: 2, quiet: true,
-    bestFor: 'Days when energy is okay and you want to build capacity.',
-    full: ['Chair sit-to-stand · 3 x 10', 'Bird dog · 2 x 8 each side', 'Counter plank · 3 x 20 sec', 'Step-back lunges to comfortable range · 2 x 6 each side', 'Easy bike · 10 min'],
-    minimum: ['Counter plank · 2 x 15 sec', 'Easy bike · 5 min'],
-    recovery: ['Bird dog · 1 x 5 each side', 'Easy bike · 5 min']
-  },
-  {
-    id: 'posture-cardio', title: 'Posture reset + low-impact cardio', focus: 'posture', level: 1, quiet: true,
-    bestFor: 'Good default between lunch and dinner.',
-    full: ['Wall posture hold · 3 x 30 sec', 'Wall angels · 3 x 8', 'Chair march · 3 x 30 sec', 'Easy bike · 15 min', 'Slow breathing · 2 min'],
-    minimum: ['Wall posture hold · 1 x 30 sec', 'Chair march · 1 min'],
-    recovery: ['Wall posture hold · 1 x 20 sec', 'Slow breathing · 2 min']
-  },
-  {
-    id: 'minimum-friday', title: 'Minimum-win Friday', focus: 'habit', level: 1, quiet: true,
-    bestFor: 'Protecting the habit at the end of the workweek.',
-    full: ['Easy bike · 10–15 min', 'Chair sit-to-stand · 2 x 8', 'Counter pushups · 2 x 8', 'Stretch anything tight · 5 min'],
-    minimum: ['5 min movement. Anything counts.'],
-    recovery: ['Stretch anything tight · 3 min']
-  },
-  {
-    id: 'long-comfortable', title: 'Longer comfortable movement', focus: 'stamina', level: 2, quiet: true,
-    bestFor: 'Weekend stamina building without intensity.',
-    full: ['Easy bike or walk · 20–30 min', 'Chair sit-to-stand · 3 x 8', 'Wall angels · 3 x 8', 'Hip/hamstring/calf stretch · 8 min', 'Weekly check-in'],
-    minimum: ['10 min easy movement', 'Quick stretch'],
-    recovery: ['Easy walk or bike · 8 min', 'Gentle stretch · 3 min']
-  },
-  {
-    id: 'weekly-reset', title: 'Recovery + weekly reset', focus: 'recovery', level: 1, quiet: true,
-    bestFor: 'Sunday reset, soreness, or low sleep.',
-    full: ['5 min easy bike or walk', '10 min mobility flow', 'Chair hamstring stretch · 2 rounds', 'Wall posture hold · 3 x 30 sec', 'Plan tomorrow\'s meals'],
-    minimum: ['5 min gentle stretch', 'Log weight or mood'],
-    recovery: ['2 min breathing', 'One gentle stretch']
-  }
-];
-
-const weekdayWorkoutOrder = ['weekly-reset', 'chair-posture', 'quiet-cardio', 'core-stamina', 'posture-cardio', 'minimum-friday', 'long-comfortable'];
-
-const exerciseGuide = [
-  {
-    id: 'chair-sit-to-stand', name: 'Chair sit-to-stand', category: 'Legs + stamina', tags: ['quiet', 'chair', 'beginner', 'no equipment'],
-    purpose: 'Builds the strength you use every time you get out of a chair, car, or bed.',
-    reps: 'Start with 1–3 rounds of 6–10 reps.',
-    steps: ['Stand in front of a sturdy chair with your feet about shoulder-width apart.', 'Reach your hips back and touch the chair like you are sitting down slowly.', 'Pause lightly on the chair if needed, then stand back up by pushing through your feet.', 'Keep your chest tall and let your knees point the same direction as your toes.'],
-    feel: 'Thighs, glutes, and a little breathing effort. It should feel like work, not joint pain.',
-    easier: 'Use your hands lightly on your thighs or chair arms, or use a taller chair.',
-    harder: 'Slow the lower down to three seconds or do not fully sit between reps.',
-    mistake: 'Dropping into the chair, rocking forward hard, or letting the knees collapse inward.',
-    stop: 'Sharp knee, hip, or back pain; dizziness; or feeling unstable.'
-  },
-  {
-    id: 'wall-angels', name: 'Wall angels', category: 'Posture', tags: ['quiet', 'posture', 'upper back'],
-    purpose: 'Helps open the chest and wake up the upper back after sitting or leaning forward.',
-    reps: 'Start with 1–3 rounds of 6–8 slow reps.',
-    steps: ['Stand with your back near a wall and feet a few inches away.', 'Gently bring your ribs down so you are not arching your lower back hard.', 'Place arms against the wall in a goal-post shape if comfortable.', 'Slide your arms up and down slowly only as far as your shoulders allow.'],
-    feel: 'Gentle stretch in chest/shoulders and light work between shoulder blades.',
-    easier: 'Move your feet farther from the wall or keep arms slightly away from the wall.',
-    harder: 'Move slower and pause for one breath at the top and bottom.',
-    mistake: 'Forcing the arms flat, shrugging shoulders to ears, or arching the lower back to cheat.',
-    stop: 'Sharp shoulder pain, numbness, or tingling.'
-  },
-  {
-    id: 'counter-pushup', name: 'Counter pushup', category: 'Upper body', tags: ['quiet', 'beginner', 'no floor'],
-    purpose: 'Builds chest, shoulders, arms, and core without getting on the floor.',
-    reps: 'Start with 1–3 rounds of 6–10 reps.',
-    steps: ['Place hands on a sturdy counter or wall, slightly wider than shoulders.', 'Step your feet back so your body is in a straight line.', 'Bend your elbows and bring your chest toward the counter.', 'Push back to the starting position while keeping your body stiff like a plank.'],
-    feel: 'Chest, arms, shoulders, and light core tension.',
-    easier: 'Use a wall or higher surface.',
-    harder: 'Use a lower sturdy surface or slow the lowering part.',
-    mistake: 'Letting hips sag, shrugging shoulders, or flaring elbows straight out.',
-    stop: 'Sharp shoulder, wrist, elbow, or chest pain.'
-  },
-  {
-    id: 'dead-bug', name: 'Dead bug / heel taps', category: 'Core', tags: ['quiet', 'floor', 'core'],
-    purpose: 'Teaches your core to brace without yanking on your neck or back.',
-    reps: 'Start with 1–2 rounds of 5–8 each side.',
-    steps: ['Lie on your back with knees bent.', 'Gently tighten your belly like you are bracing before a cough.', 'Lift one foot and slowly tap the heel back down, then switch sides.', 'Keep breathing and keep the lower back from arching hard.'],
-    feel: 'Deep core effort, not neck strain.',
-    easier: 'Keep both arms down and tap one heel at a time.',
-    harder: 'Reach the opposite arm back as the heel taps down.',
-    mistake: 'Holding breath, rushing, or letting the back arch hard off the floor.',
-    stop: 'Sharp back pain or hip pinching.'
-  },
-  {
-    id: 'bird-dog', name: 'Bird dog', category: 'Core + back', tags: ['quiet', 'floor', 'posture'],
-    purpose: 'Builds back-friendly core control and balance.',
-    reps: 'Start with 1–2 rounds of 5–8 each side.',
-    steps: ['Start on hands and knees.', 'Brace gently and keep your back flat like a table.', 'Reach one leg back. Add the opposite arm only if stable.', 'Pause for one breath, then return slowly and switch sides.'],
-    feel: 'Core, glutes, and upper back working to keep you steady.',
-    easier: 'Move only one leg at a time or keep toes touching the floor.',
-    harder: 'Pause longer without twisting.',
-    mistake: 'Twisting the hips open, arching the low back, or rushing reps.',
-    stop: 'Sharp back, shoulder, wrist, or knee pain.'
-  },
-  {
-    id: 'counter-plank', name: 'Counter plank', category: 'Core', tags: ['quiet', 'no floor', 'beginner'],
-    purpose: 'Builds core stiffness and posture without floor planks.',
-    reps: 'Start with 2–3 holds of 10–20 seconds.',
-    steps: ['Place forearms or hands on a sturdy counter.', 'Step back until your body forms a straight line.', 'Squeeze glutes lightly and brace your belly.', 'Hold while breathing normally.'],
-    feel: 'Core, shoulders, and glutes working together.',
-    easier: 'Use a higher surface or shorter hold.',
-    harder: 'Step farther back or hold longer.',
-    mistake: 'Letting hips sag, holding breath, or shrugging shoulders.',
-    stop: 'Sharp back, shoulder, wrist, or chest pain.'
-  },
-  {
-    id: 'chair-march', name: 'Chair march', category: 'Cardio', tags: ['quiet', 'chair', 'stamina'],
-    purpose: 'Raises heart rate gently without jumping or bothering downstairs neighbors.',
-    reps: 'Start with 30–60 seconds, repeat 1–3 times.',
-    steps: ['Sit tall near the front of a sturdy chair.', 'Hold the sides of the chair if needed.', 'Lift one knee, set it down, then lift the other knee.', 'Keep a smooth rhythm and breathe.'],
-    feel: 'Light cardio, hip flexors, and core posture.',
-    easier: 'Lift feet only a little or slow down.',
-    harder: 'Move a little faster or extend the time.',
-    mistake: 'Slumping backward or holding breath.',
-    stop: 'Dizziness, chest pain, or sharp hip/back pain.'
-  },
-  {
-    id: 'easy-bike', name: 'Easy stationary bike', category: 'Stamina', tags: ['bike', 'low impact', 'cardio'],
-    purpose: 'Builds stamina with low joint impact and a very clear intensity dial.',
-    reps: 'Start with 5–20 minutes at easy to comfortable effort.',
-    steps: ['Set resistance low enough that your knees feel smooth.', 'Pedal easy for two minutes.', 'Settle into a pace where you can still talk in short sentences.', 'Cool down easy for one to two minutes.'],
-    feel: 'Warmth, breathing effort, and leg work without grinding knees.',
-    easier: 'Lower resistance or ride for five minutes only.',
-    harder: 'Add a few minutes, not a big jump in resistance.',
-    mistake: 'Starting too hard, cranking resistance, or chasing exhaustion.',
-    stop: 'Chest pain, dizziness, unusual shortness of breath, or sharp knee pain.'
-  },
-  {
-    id: 'wall-posture-hold', name: 'Wall posture hold', category: 'Posture reset', tags: ['quiet', 'posture', 'recovery'],
-    purpose: 'A simple reset for standing tall and relaxing the neck/shoulders.',
-    reps: 'Hold 20–30 seconds, repeat 1–3 times.',
-    steps: ['Stand with your back near a wall.', 'Let the back of your head move gently toward the wall without forcing it.', 'Keep ribs relaxed and breathe slowly.', 'Think tall through the crown of your head.'],
-    feel: 'Gentle posture awareness, not a hard stretch.',
-    easier: 'Stand away from the wall and do the same tall posture.',
-    harder: 'Add slow breathing or gentle chin tucks.',
-    mistake: 'Forcing the head back or arching the lower back.',
-    stop: 'Neck pain, headache, numbness, or tingling.'
-  },
-  {
-    id: 'hip-flexor-stretch', name: 'Standing hip flexor stretch', category: 'Mobility', tags: ['quiet', 'mobility', 'recovery'],
-    purpose: 'Helps the front of the hip after long sitting days.',
-    reps: 'Hold 20–30 seconds each side.',
-    steps: ['Stand in a split stance with one foot forward and one foot back.', 'Hold a wall or chair for balance.', 'Gently tuck your hips under like tightening a belt buckle.', 'Shift forward slightly until you feel the front of the back hip.'],
-    feel: 'Mild stretch in the front of the hip/thigh.',
-    easier: 'Shorten the stance and use support.',
-    harder: 'Reach the same-side arm overhead if comfortable.',
-    mistake: 'Arching the low back or bouncing.',
-    stop: 'Sharp hip, knee, or back pain.'
-  }
-];
-
-
-const windDownPrompts = [
-  'What went right today, even if it was small?',
-  'What made today harder than it needed to be?',
-  'What is one thing tomorrow-you would appreciate?',
-  'Where did you keep a promise to yourself today?',
-  'What can be lighter, simpler, or kinder tomorrow?',
-  'What did your body need today?',
-  'What is one reason to be proud of not giving up?'
-];
-
-const defaultRoutines = {
-  workday: {
-    label: 'Workday mode',
-    morning: [
-      { id: 'm-brush-teeth', text: 'Brush teeth for 2 minutes', minutes: 2 },
-      { id: 'm-tongue-mouth', text: 'Tongue scrape + mouthwash if using it', minutes: 1 },
-      { id: 'm-face', text: 'Rinse or cleanse face; use eye cream/moisturizer as planned', minutes: 3 },
-      { id: 'm-deodorant-lip', text: 'Deodorant + lip balm', minutes: 1 },
-      { id: 'm-check-app', text: 'Open Pathfinder and see today\'s focus', minutes: 1 },
-      { id: 'm-pack-food', text: 'Confirm meals are packed or planned', minutes: 2 },
-      { id: 'm-water', text: 'Start water early', minutes: 1 }
-    ],
-    betweenLunchDinner: [
-      { id: 'bd-log-lunch', text: 'Log lunch honestly', minutes: 1 },
-      { id: 'bd-movement', text: 'Movement before dinner', minutes: 20 },
-      { id: 'bd-water', text: 'Check water before the evening gets away', minutes: 1 }
-    ],
-    evening: [
-      { id: 'e-dinner', text: 'Log dinner or swap', minutes: 1 },
-      { id: 'e-brush-teeth', text: 'Brush teeth for 2 minutes', minutes: 2 },
-      { id: 'e-floss', text: 'Floss or water flosser + tongue scrape', minutes: 3 },
-      { id: 'e-cleanse', text: 'Cleanse face', minutes: 2 },
-      { id: 'e-retinol-moisturizer', text: 'Retinol if scheduled, then night moisturizer', minutes: 2 },
-      { id: 'e-hands-feet-lips', text: 'Hand cream, foot cream as needed, and lip balm', minutes: 2 },
-      { id: 'e-winddown', text: 'Wind-down note', minutes: 4 },
-      { id: 'e-tomorrow', text: 'Make tomorrow easier', minutes: 3 }
-    ]
-  },
-  weekend: {
-    label: 'Weekend mode',
-    morning: [
-      { id: 'wm-brush-teeth', text: 'Brush teeth + tongue scrape', minutes: 3 },
-      { id: 'wm-face', text: 'Face routine: rinse/cleanse, eye cream, moisturizer', minutes: 4 },
-      { id: 'wm-weight', text: 'Weigh in when convenient', minutes: 1 },
-      { id: 'wm-review', text: 'Check progress trend', minutes: 3 }
-    ],
-    betweenLunchDinner: [
-      { id: 'wbd-movement', text: 'Longer comfortable movement', minutes: 30 },
-      { id: 'wbd-prep', text: 'Prep or restock simple meals', minutes: 20 }
-    ],
-    evening: [
-      { id: 'we-brush-floss', text: 'Brush + floss/water flosser', minutes: 5 },
-      { id: 'we-skin', text: 'Night face routine + lip balm', minutes: 4 },
-      { id: 'we-weekly-nails', text: 'Weekly nails: trim/file with nail kit if needed', minutes: 8 },
-      { id: 'we-foot-care', text: 'Weekly foot check: dry feet, heel cream/pumice if needed', minutes: 6 },
-      { id: 'we-shoe-powder', text: 'Shoe odor powder/reset if needed', minutes: 2 },
-      { id: 'we-review', text: 'Weekly review or light recap', minutes: 8 },
-      { id: 'we-reset', text: 'Reset the app for Monday', minutes: 3 }
-    ]
-  }
-};
-
 const appState = {
   activeTab: 'today',
   selectedDate: todayKey(),
@@ -397,6 +87,7 @@ const appState = {
 function defaultState() {
   return {
     version: APP_VERSION,
+    schemaVersion: APP_DATA_SCHEMA_VERSION,
     meta: { createdAt: new Date().toISOString(), updatedAt: '' },
     settings: {
       name: '',
@@ -439,36 +130,47 @@ function defaultState() {
 }
 
 function loadState() {
-  try {
-    const candidates = [
-      parseStateCandidate(safeLocalGet(STORAGE_KEY), 'localStorage'),
-      parseStateCandidate(safeLocalGet(STORAGE_BACKUP_KEY), 'localStorage backup'),
-      parseStateCandidate(safeSessionGet(SESSION_STORAGE_KEY), 'sessionStorage')
-    ].filter(Boolean);
+  const candidates = [
+    parseStateCandidate(safeLocalGet(STORAGE_KEY), 'legacy localStorage primary'),
+    parseStateCandidate(safeLocalGet(STORAGE_BACKUP_KEY), 'legacy localStorage backup'),
+    parseStateCandidate(safeSessionGet(SESSION_STORAGE_KEY), 'legacy sessionStorage')
+  ].filter(Boolean);
 
-    for (const key of LEGACY_KEYS) {
-      candidates.push(parseStateCandidate(safeLocalGet(key), key === STORAGE_BACKUP_KEY ? 'localStorage backup' : 'legacy localStorage'));
-    }
-
-    const best = chooseStoredStateCandidate(candidates);
-    if (!best) {
-      storageLoadSource = 'default';
-      return defaultState();
-    }
-
-    storageLoadSource = best.source;
-    const migrated = mergeDefaults(defaultState(), best.parsed);
-    migrated.version = APP_VERSION;
-    migrateState(migrated);
-    return migrated;
-  } catch (error) {
-    storageLastError = error.message || String(error);
-    console.warn('Unable to load saved state:', error);
-    return defaultState();
+  for (const key of LEGACY_KEYS) {
+    const source = key === STORAGE_BACKUP_KEY ? 'legacy localStorage backup' : `legacy ${key}`;
+    const candidate = parseStateCandidate(safeLocalGet(key), source);
+    if (candidate) candidates.push(candidate);
   }
+
+  const ranked = chooseStoredStateCandidates(candidates);
+  for (const candidate of ranked) {
+    try {
+      const migrated = prepareStateCandidate(candidate.parsed);
+      storageLoadSource = candidate.source;
+      return migrated;
+    } catch (error) {
+      console.warn(`Skipped invalid Pathfinder candidate from ${candidate.source}:`, error);
+    }
+  }
+
+  storageLoadSource = 'default';
+  return defaultState();
 }
 
-function migrateState(state) {
+function prepareStateCandidate(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Saved state root is invalid');
+  assertSafeStateKeys(parsed);
+  migrationDirtyDayKeys = new Set();
+  const migrated = mergeDefaults(defaultState(), parsed);
+  const originalSchemaVersion = Number(parsed.schemaVersion || 0);
+  migrated.version = APP_VERSION;
+  migrateState(migrated, originalSchemaVersion);
+  validateFoundationState(migrated);
+  return migrated;
+}
+
+function migrateState(state, originalSchemaVersion = Number(state.schemaVersion || 0)) {
+  state.schemaVersion = APP_DATA_SCHEMA_VERSION;
   state.plan = state.plan && state.plan.meals ? mergeDefaults(structuredClone(defaultMealPlan), state.plan) : structuredClone(defaultMealPlan);
   state.foods = Array.isArray(state.foods) && state.foods.length ? state.foods : structuredClone(defaultFoods);
   state.savedMeals = Array.isArray(state.savedMeals) && state.savedMeals.length ? state.savedMeals : structuredClone(defaultSavedMeals);
@@ -477,7 +179,30 @@ function migrateState(state) {
   state.weather = mergeDefaults({ loading: false, fetchedAt: '', error: '', current: null, hourly: [] }, state.weather || {});
   state.workouts = Array.isArray(state.workouts) && state.workouts.length ? state.workouts : structuredClone(workouts);
   state.routines = mergeRoutineDefaults(state.routines || {});
-  Object.values(state.days || {}).forEach(migrateDay);
+  state.days = state.days && typeof state.days === 'object' && !Array.isArray(state.days) ? state.days : {};
+
+  const routineModeKey = state.settings?.routineMode || 'workday';
+  const routineMode = state.routines[routineModeKey] || state.routines.workday || {};
+  const migratedAt = new Date().toISOString();
+  Object.entries(state.days).forEach(([key, day]) => {
+    if (!day || typeof day !== 'object' || Array.isArray(day)) throw new Error(`Invalid day record: ${key}`);
+    if (!day.key) day.key = key;
+    migrateDay(day);
+    const defaultWorkoutId = weekdayWorkoutOrder[dayOfWeek(key)] || 'chair-posture';
+    const defaultWorkout = state.workouts.find(item => item.id === defaultWorkoutId) || state.workouts[0] || null;
+    const snapshotChanged = backfillHistorySnapshots(day, {
+      plan: state.plan,
+      swaps: state.swaps,
+      workouts: state.workouts,
+      defaultWorkout,
+      routineModeKey,
+      routineMode,
+      routineBlocks: ROUTINE_BLOCKS,
+      mealKeys: MEAL_KEYS,
+      migratedAt
+    });
+    if (snapshotChanged || originalSchemaVersion < APP_DATA_SCHEMA_VERSION) migrationDirtyDayKeys.add(key);
+  });
 }
 
 function mergeDefaults(base, incoming) {
@@ -525,7 +250,7 @@ function parseStateCandidate(raw, source) {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     assertSafeStateKeys(parsed);
     return { raw, parsed, source, updatedAt: candidateDateValue(parsed), hasUserData: stateHasUserData(parsed) };
   } catch {
@@ -537,96 +262,35 @@ function candidateDateValue(state) {
   return Date.parse(state?.meta?.updatedAt || state?.meta?.createdAt || '') || 0;
 }
 
-function chooseStoredStateCandidate(candidates) {
-  const valid = candidates.filter(Boolean);
-  if (!valid.length) return null;
-
-  valid.sort((a, b) => {
+function chooseStoredStateCandidates(candidates) {
+  return candidates.filter(Boolean).sort((a, b) => {
     if (a.hasUserData !== b.hasUserData) return a.hasUserData ? -1 : 1;
     return b.updatedAt - a.updatedAt;
   });
-
-  return valid[0];
 }
 
-function saveState() {
+function markDayDirty(key = appState.selectedDate) {
+  if (validDateKey(key)) dirtyDayKeys.add(key);
+}
+
+function saveState(options = {}) {
   appState.data.version = APP_VERSION;
+  appState.data.schemaVersion = APP_DATA_SCHEMA_VERSION;
   appState.data.meta = appState.data.meta || {};
   appState.data.meta.updatedAt = new Date().toISOString();
-  const payload = JSON.stringify(appState.data);
-  const errors = [];
-  let syncSaved = false;
 
-  try {
-    localStorage.setItem(STORAGE_KEY, payload);
-    localStorage.setItem(STORAGE_BACKUP_KEY, payload);
-    const verifyPrimary = localStorage.getItem(STORAGE_KEY);
-    if (verifyPrimary !== payload) throw new Error('localStorage verification failed after save');
-    syncSaved = true;
-  } catch (error) {
-    errors.push(`localStorage: ${error.message || error}`);
-    console.warn('Unable to save Pathfinder state to localStorage:', error);
-  }
-
-  try {
-    sessionStorage.setItem(SESSION_STORAGE_KEY, payload);
-    const verifySession = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (verifySession !== payload) throw new Error('sessionStorage verification failed after save');
-    syncSaved = true;
-  } catch (error) {
-    errors.push(`sessionStorage: ${error.message || error}`);
-    console.warn('Unable to save Pathfinder state to sessionStorage:', error);
-  }
-
-  queueIndexedDbSave(payload);
-
-  storageLastError = errors.join(' | ');
-  if (!syncSaved) showToast?.('Storage warning: export a backup');
-}
-
-function queueIndexedDbSave(payload) {
-  if (!('indexedDB' in window)) return;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => savePayloadToIndexedDb(payload).catch(error => {
-    storageLastError = error.message || String(error);
-    console.warn('IndexedDB save failed:', error);
-  }), 80);
-}
-
-function openPathfinderDb() {
-  return new Promise((resolve, reject) => {
-    if (!('indexedDB' in window)) return reject(new Error('IndexedDB unavailable'));
-    const request = indexedDB.open(IDB_DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(IDB_STORE_NAME)) db.createObjectStore(IDB_STORE_NAME, { keyPath: 'id' });
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+  const allDays = Boolean(options.allDays);
+  const dayKeys = allDays ? [] : [...dirtyDayKeys];
+  dirtyDayKeys.clear();
+  queueFoundationSave(() => appState.data, {
+    dayKeys,
+    allDays,
+    forceBackup: Boolean(options.forceBackup),
+    backupReason: options.backupReason || 'scheduled',
+    delay: options.immediate ? 0 : 350,
+    onSuccess: () => { storageLastError = ''; },
+    onError: error => { storageLastError = error?.message || String(error); }
   });
-}
-
-async function savePayloadToIndexedDb(payload) {
-  const db = await openPathfinderDb();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
-    tx.objectStore(IDB_STORE_NAME).put({ id: IDB_STATE_KEY, payload, updatedAt: new Date().toISOString() });
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
-  });
-  db.close();
-}
-
-async function loadPayloadFromIndexedDb() {
-  const db = await openPathfinderDb();
-  const record = await new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE_NAME, 'readonly');
-    const request = tx.objectStore(IDB_STORE_NAME).get(IDB_STATE_KEY);
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error || new Error('IndexedDB read failed'));
-  });
-  db.close();
-  return record?.payload || null;
 }
 
 function dayHasUserData(day) {
@@ -658,33 +322,47 @@ function stateHasUserData(state) {
   return false;
 }
 
-async function hydrateFromIndexedDb() {
-  try {
-    const payload = await loadPayloadFromIndexedDb();
-    if (!payload) return;
-
-    const parsed = JSON.parse(payload);
-    const migrated = mergeDefaults(defaultState(), parsed);
-    migrated.version = APP_VERSION;
-    migrateState(migrated);
-
-    const currentHasData = stateHasUserData(appState.data);
-    const idbHasData = stateHasUserData(migrated);
-
-    // 0.8.8.5 safety rule:
-    // IndexedDB is fallback only. It may restore only when the current loaded state has no meaningful user data.
-    // It must not overwrite localStorage/sessionStorage data that already has user logs.
-    if (!currentHasData && idbHasData) {
-      appState.data = migrated;
-      storageLoadSource = 'IndexedDB fallback';
-      saveState();
-      render();
-      showToast('Saved Pathfinder data restored');
+async function hydrateFromDataFoundation() {
+  const candidates = await loadFoundationCandidates();
+  for (const candidate of candidates) {
+    try {
+      appState.data = prepareStateCandidate(candidate.state);
+      storageLoadSource = candidate.source;
+      const migratedDayKeys = [...migrationDirtyDayKeys];
+      migrationDirtyDayKeys.clear();
+      await flushFoundationSave(() => appState.data, {
+        dayKeys: migratedDayKeys,
+        allDays: candidate.source !== 'IndexedDB primary',
+        forceBackup: candidate.source !== 'IndexedDB primary',
+        backupReason: candidate.source === 'IndexedDB primary' ? 'scheduled' : 'recovered-foundation'
+      });
+      storageLastError = '';
+      await refreshFoundationDiagnostics();
+      return;
+    } catch (error) {
+      console.warn(`Skipped unusable ${candidate.source}:`, error);
+      storageLastError = error.message || String(error);
     }
-  } catch (error) {
-    storageLastError = error.message || String(error);
-    console.warn('IndexedDB hydration skipped:', error);
   }
+
+  // No usable 1.1 foundation existed. The already-loaded 1.0.1/legacy state becomes the migration source.
+  appState.data = prepareStateCandidate(appState.data);
+  migrationDirtyDayKeys.clear();
+  await flushFoundationSave(() => appState.data, {
+    allDays: true,
+    forceBackup: true,
+    backupReason: storageLoadSource === 'default' ? 'initial-foundation' : '1.0.1-migration'
+  });
+  storageLoadSource = storageLoadSource === 'default' ? 'new 1.1 foundation' : `${storageLoadSource} → 1.1 foundation`;
+  storageLastError = '';
+  await refreshFoundationDiagnostics();
+}
+
+async function refreshFoundationDiagnostics(rerender = false) {
+  foundationDiagnosticsCache = await getFoundationDiagnostics();
+  if (foundationDiagnosticsCache.error) storageLastError = foundationDiagnosticsCache.error;
+  if (rerender) render();
+  return foundationDiagnosticsCache;
 }
 
 async function requestPersistentStorage() {
@@ -696,12 +374,17 @@ async function requestPersistentStorage() {
 }
 
 function flushStateOnPageLeave() {
-  try {
-    saveState();
-    localStorage.setItem('pathfinder.last-flush.v1', new Date().toISOString());
-  } catch (error) {
-    console.warn('Final save failed:', error);
-  }
+  appState.data.version = APP_VERSION;
+  appState.data.schemaVersion = APP_DATA_SCHEMA_VERSION;
+  appState.data.meta = appState.data.meta || {};
+  appState.data.meta.updatedAt = new Date().toISOString();
+  writeEmergencyMetadata(appState.data);
+  const dayKeys = [...dirtyDayKeys];
+  dirtyDayKeys.clear();
+  flushFoundationSave(() => appState.data, { dayKeys }).catch(error => {
+    storageLastError = error.message || String(error);
+    console.warn('Final foundation save failed:', error);
+  });
 }
 
 function toDateKey(date) {
@@ -739,15 +422,18 @@ function createDay(key) {
       statuses: { breakfast: '', lunch: '', dinner: '' },
       notes: { breakfast: '', lunch: '', dinner: '' },
       customItems: [],
-      swaps: {}
+      swaps: {},
+      snapshots: {},
+      planSnapshot: null
     },
-    exercise: { status: '', workoutId: workoutForDate(key).id, version: '', completed: false, minutes: '', intensity: 'comfortable', soreness: '', pain: '', notes: '' },
+    exercise: { status: '', workoutId: workoutForDate(key).id, version: '', completed: false, minutes: '', intensity: 'comfortable', soreness: '', pain: '', notes: '', snapshot: null },
     checkin: { energy: '', mood: '', sleep: '', stress: '', hunger: '', water: 0, notes: '' },
     windDown: { completed: false, calmMinutes: '', note: '' },
-    routine: { completedIds: {} },
+    routine: { completedIds: {}, snapshot: null },
     weight: '',
     dailyNote: '',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    history: { snapshotVersion: HISTORY_SNAPSHOT_VERSION, migratedAt: '' }
   };
 }
 
@@ -756,6 +442,8 @@ function migrateDay(day) {
   day.meals.statuses = day.meals.statuses || {};
   day.meals.notes = day.meals.notes || {};
   day.meals.swaps = day.meals.swaps || {};
+  day.meals.snapshots = day.meals.snapshots || {};
+  if (!Object.prototype.hasOwnProperty.call(day.meals, 'planSnapshot')) day.meals.planSnapshot = null;
   MEAL_KEYS.forEach(key => {
     if (typeof day.meals[key] === 'boolean' && day.meals[key] && !day.meals.statuses[key]) day.meals.statuses[key] = 'planned';
     if (!Object.prototype.hasOwnProperty.call(day.meals.statuses, key)) day.meals.statuses[key] = '';
@@ -764,12 +452,13 @@ function migrateDay(day) {
   });
   if (!Array.isArray(day.meals.customItems)) day.meals.customItems = [];
   const oldExercise = day.exercise || {};
-  day.exercise = mergeDefaults({ status: '', workoutId: workoutForDate(day.key || todayKey()).id, version: '', completed: false, minutes: '', intensity: 'comfortable', soreness: '', pain: '', notes: '' }, oldExercise);
+  day.exercise = mergeDefaults({ status: '', workoutId: workoutForDate(day.key || todayKey()).id, version: '', completed: false, minutes: '', intensity: 'comfortable', soreness: '', pain: '', notes: '', snapshot: null }, oldExercise);
   if (!day.exercise.status && day.exercise.completed) day.exercise.status = day.exercise.version || 'minimum';
   day.exercise.completed = ['full', 'minimum', 'recovery'].includes(day.exercise.status) || Boolean(day.exercise.completed);
   day.checkin = mergeDefaults({ energy: '', mood: '', sleep: '', stress: '', hunger: '', water: 0, notes: '' }, day.checkin || {});
   day.windDown = mergeDefaults({ completed: false, calmMinutes: '', note: '' }, day.windDown || {});
-  day.routine = mergeDefaults({ completedIds: {} }, day.routine || {});
+  day.routine = mergeDefaults({ completedIds: {}, snapshot: null }, day.routine || {});
+  day.history = mergeDefaults({ snapshotVersion: HISTORY_SNAPSHOT_VERSION, migratedAt: '' }, day.history || {});
   if (!Object.prototype.hasOwnProperty.call(day, 'weight')) day.weight = '';
   if (!Object.prototype.hasOwnProperty.call(day, 'dailyNote')) day.dailyNote = '';
 }
@@ -777,9 +466,11 @@ function migrateDay(day) {
 function getDay(key = appState.selectedDate) {
   if (!appState.data.days[key]) {
     appState.data.days[key] = createDay(key);
+    markDayDirty(key);
     saveState();
   } else {
     migrateDay(appState.data.days[key]);
+    markDayDirty(key);
   }
   return appState.data.days[key];
 }
@@ -818,9 +509,113 @@ function selectedSwapForMeal(day, key) {
   return id ? appState.data.swaps.find(item => item.id === id) || null : null;
 }
 
+function ensureDayPlanSnapshot(day) {
+  if (!day.meals.planSnapshot) day.meals.planSnapshot = buildPlanSnapshot(getPlan());
+  return day.meals.planSnapshot;
+}
+
+function captureMealSnapshotForDay(day, key) {
+  migrateDay(day);
+  const status = statusForMeal(day, key);
+  if (!status) {
+    delete day.meals.snapshots[key];
+    return;
+  }
+  ensureDayPlanSnapshot(day);
+  day.meals.snapshots[key] = buildMealSnapshot({
+    key,
+    status,
+    meal: getPlan().meals?.[key] || {},
+    swap: selectedSwapForMeal(day, key)
+  });
+}
+
+function captureRoutineSnapshotForDay(day, force = false, requiredId = '') {
+  migrateDay(day);
+  const modeKey = appState.data.settings.routineMode || 'workday';
+  const mode = appState.data.routines[modeKey] || appState.data.routines.workday || {};
+  const currentSnapshot = buildRoutineSnapshot({ modeKey, mode, blocks: ROUTINE_BLOCKS });
+  if (!day.routine.snapshot || force) {
+    day.routine.snapshot = currentSnapshot;
+    return day.routine.snapshot;
+  }
+  if (requiredId && !day.routine.snapshot.items?.some(item => item.id === requiredId)) {
+    const required = currentSnapshot.items.find(item => item.id === requiredId);
+    if (required) day.routine.snapshot.items = [...(day.routine.snapshot.items || []), required];
+  }
+  return day.routine.snapshot;
+}
+
+function captureWorkoutSnapshotForDay(day, force = false) {
+  migrateDay(day);
+  const workout = getWorkoutById(day.exercise.workoutId) || workoutForDate(day.key || appState.selectedDate);
+  if (!force && day.exercise.snapshot?.id === workout?.id) return day.exercise.snapshot;
+  day.exercise.snapshot = buildWorkoutSnapshot(workout);
+  return day.exercise.snapshot;
+}
+
+function routineItemsForDay(day) {
+  return routineItemsFromSnapshot(day) || routineItemsForSelectedMode();
+}
+
+function routineLabelForDay(day) {
+  return day?.routine?.snapshot?.label || selectedRoutineLabel();
+}
+
+function routineBlockItemsForDay(day, block) {
+  const snapshotItems = routineItemsFromSnapshot(day);
+  if (snapshotItems) return snapshotItems.filter(item => item.block === block);
+  return selectedRoutineMode()?.[block] || [];
+}
+
+function workoutForDay(day) {
+  return day?.exercise?.snapshot
+    || getWorkoutById(day?.exercise?.workoutId)
+    || workoutForDate(day?.key || appState.selectedDate);
+}
+
+function mealForDayDisplay(day, key) {
+  const current = getPlan().meals?.[key] || {};
+  const status = statusForMeal(day, key);
+  const snapshot = day?.meals?.snapshots?.[key];
+  if (!snapshot || snapshot.status !== status) return { ...current, historicalSnapshot: false };
+
+  const base = snapshot.base || {};
+  const adjustment = snapshot.adjustment || null;
+  const customReplacement = status === 'swapped' && !adjustment;
+  const items = Array.isArray(base.items) ? [...base.items] : [];
+  if (adjustment?.name) items.push(`${adjustment.name} adjustment`);
+  if (customReplacement) items.push('Replacement nutrition is recorded in the extra food log.');
+
+  return {
+    ...base,
+    label: snapshot.label || base.label || capitalize(key),
+    shortLabel: base.shortLabel || snapshot.label || capitalize(key),
+    subtitle: customReplacement
+      ? 'Frozen custom replacement log'
+      : adjustment?.name
+        ? `Frozen log · ${adjustment.name}`
+        : 'Frozen at logging',
+    calories: Number(snapshot.calories || 0),
+    protein: Number(snapshot.protein || 0),
+    fiber: Number(snapshot.fiber || 0),
+    items,
+    recipe: null,
+    historicalSnapshot: true,
+    snapshotCapturedAt: snapshot.capturedAt || '',
+    customReplacement
+  };
+}
+
+function planNameForDay(day) {
+  return day?.meals?.planSnapshot?.planName || getPlan().planName;
+}
+
 function loggedMealNutrient(day, nutrient) {
   const plan = getPlan();
   return MEAL_KEYS.reduce((sum, key) => {
+    const snapshotted = mealSnapshotNutrient(day, key, nutrient);
+    if (snapshotted !== null) return sum + snapshotted;
     if (mealPlanned(day, key)) return sum + Number(plan.meals[key]?.[nutrient] || 0);
     if (mealSwapped(day, key)) {
       const swap = selectedSwapForMeal(day, key);
@@ -842,9 +637,10 @@ function customFiber(day) { return day.meals.customItems.reduce((sum, item) => s
 function totalsForDay(day) {
   migrateDay(day);
   const plan = getPlan();
-  const plannedCalories = Number(plan.baseCalories || MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.calories || 0), 0));
-  const plannedProtein = Number(plan.baseMacros?.protein || MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.protein || 0), 0));
-  const plannedFiber = Number(plan.baseMacros?.fiber || MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.fiber || 0), 0));
+  const planSnapshot = day.meals?.planSnapshot;
+  const plannedCalories = Number(planSnapshot?.baseCalories ?? plan.baseCalories ?? MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.calories || 0), 0));
+  const plannedProtein = Number(planSnapshot?.baseMacros?.protein ?? plan.baseMacros?.protein ?? MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.protein || 0), 0));
+  const plannedFiber = Number(planSnapshot?.baseMacros?.fiber ?? plan.baseMacros?.fiber ?? MEAL_KEYS.reduce((sum, key) => sum + Number(plan.meals[key]?.fiber || 0), 0));
   const loggedCalories = loggedMealCalories(day) + customCalories(day);
   const loggedProtein = loggedMealProtein(day) + customProtein(day);
   const loggedFiber = loggedMealFiber(day) + customFiber(day);
@@ -855,8 +651,8 @@ function totalsForDay(day) {
     loggedCalories,
     loggedProtein,
     loggedFiber,
-    fat: Number(plan.baseMacros?.fat || 0),
-    carbs: Number(plan.baseMacros?.carbs || 0),
+    fat: Number(planSnapshot?.baseMacros?.fat ?? plan.baseMacros?.fat ?? 0),
+    carbs: Number(planSnapshot?.baseMacros?.carbs ?? plan.baseMacros?.carbs ?? 0),
     fiber: loggedFiber
   };
 }
@@ -910,7 +706,7 @@ function checkinHasData(day) {
 }
 
 function routineCompletion(day) {
-  const ids = routineItemsForSelectedMode().map(item => item.id);
+  const ids = routineItemsForDay(day).map(item => item.id);
   if (!ids.length) return 0;
   const completed = ids.filter(id => day.routine.completedIds[id]).length;
   return Math.round((completed / ids.length) * 100);
@@ -965,13 +761,13 @@ async function copyTextWithFallback(text, successMessage, consoleLabel) {
 
 function releaseReadinessCardHtml() {
   const diagnostics = storageDiagnostics();
-  const primary = diagnostics.find(item => item.label === 'localStorage primary') || {};
-  const backup = diagnostics.find(item => item.label === 'localStorage backup') || {};
+  const primary = diagnostics.find(item => item.label === 'IndexedDB foundation') || {};
+  const backup = diagnostics.find(item => item.label === 'Last-known-good backups') || {};
   const activeTabOk = APP_TABS.includes(appState.activeTab);
   const dateOk = validDateKey(appState.selectedDate);
   const saveReady = !storageLastError;
   const primaryReady = Boolean(primary.exists);
-  const backupReady = Boolean(backup.exists);
+  const backupReady = Boolean(backup.exists && Number(backup.days || 0) > 0);
   const overallReady = activeTabOk && dateOk && saveReady && primaryReady && backupReady;
   return `<div class="card">
     <div class="card-title">
@@ -982,12 +778,12 @@ function releaseReadinessCardHtml() {
       <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '1.0.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
+      <li><span>${APP_VERSION === '1.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)} · data schema ${APP_DATA_SCHEMA_VERSION}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
-      <li><span>${primaryReady ? '✓' : '○'}</span><span>Primary local save: ${escapeHtml(primaryReady ? 'readable' : 'not found')}</span></li>
-      <li><span>${backupReady ? '✓' : '○'}</span><span>Backup local save: ${escapeHtml(backupReady ? 'readable' : 'not found')}</span></li>
+      <li><span>${primaryReady ? '✓' : '○'}</span><span>IndexedDB foundation: ${escapeHtml(primaryReady ? 'readable' : 'not found')}</span></li>
+      <li><span>${backupReady ? '✓' : '○'}</span><span>Rotating backups: ${escapeHtml(backupReady ? 'readable' : 'not found')}</span></li>
     </ul>
     <p class="note">This card is read-only. It does not repair or overwrite saved data.</p>
   </div>`;
@@ -1025,21 +821,32 @@ function renderTabFallback(error) {
 }
 
 function maintenanceReleaseCardHtml() {
+  const days = Object.values(appState.data.days || {});
+  const meaningfulDays = days.filter(dayHasUserData);
+  const mealSnapshots = meaningfulDays.reduce((sum, day) => sum + Object.keys(day.meals?.snapshots || {}).length, 0);
+  const routineSnapshots = meaningfulDays.filter(day => day.routine?.snapshot).length;
+  const workoutSnapshots = meaningfulDays.filter(day => day.exercise?.snapshot).length;
   return `<div class="card highlight">
     <div class="card-title">
       <div>
-        <h3>Pathfinder 1.0.1 Correctness &amp; Safety</h3>
-        <p>A focused maintenance patch addressing the findings from the full 1.0 code audit.</p>
+        <h3>Pathfinder 1.1 Durable Data Foundation</h3>
+        <p>A structural release that freezes historical meaning and strengthens long-term local recovery.</p>
       </div>
-      <span class="badge blue">Maintenance</span>
+      <span class="badge blue">Foundation</span>
     </div>
-    <ul class="check-list mini-list">
-      <li><span>✓</span><span>Nutrition, plan recalculation, and blank-day behavior corrected.</span></li>
-      <li><span>✓</span><span>Save diagnostics and import safety strengthened.</span></li>
-      <li><span>✓</span><span>Privacy wording and public defaults corrected.</span></li>
-      <li><span>✓</span><span>Storage architecture intentionally unchanged until 1.1.</span></li>
+    <div class="grid three">
+      <div class="metric"><span class="value">${meaningfulDays.length}</span><span class="label">historical days</span><small>stored separately</small></div>
+      <div class="metric"><span class="value">${mealSnapshots}</span><span class="label">meal snapshots</span><small>fixed nutrition</small></div>
+      <div class="metric"><span class="value">${routineSnapshots + workoutSnapshots}</span><span class="label">activity snapshots</span><small>routine + workout</small></div>
+    </div>
+    <ul class="check-list mini-list" style="margin-top:14px;">
+      <li><span>✓</span><span>Meals, routines, and workouts now keep historical snapshots.</span></li>
+      <li><span>✓</span><span>Daily records are stored separately in IndexedDB.</span></li>
+      <li><span>✓</span><span>Invalid saves fall through to validated recovery candidates.</span></li>
+      <li><span>✓</span><span>Up to three last-known-good backups rotate automatically.</span></li>
+      <li><span>✓</span><span>Text saves are debounced while important exits flush immediately.</span></li>
     </ul>
-    <p class="note">1.0.1 fixes current correctness issues. The durable data-foundation redesign remains scheduled for 1.1.</p>
+    <p class="note">Legacy 1.0.1 history is frozen using the plan and routine definitions available during migration. New 1.1 logs preserve their exact definitions when recorded.</p>
   </div>`;
 }
 
@@ -1452,11 +1259,11 @@ function renderToday() {
     ${companionTodayCardHtml(day, stats)}
 
     <section class="progress-row" aria-label="Daily routine progress">
-      ${stepCard('Breakfast', getPlan().meals.breakfast.shortLabel, mealLogged(day, 'breakfast'), mealStatusLabels[statusForMeal(day, 'breakfast')])}
-      ${stepCard('Lunch', getPlan().meals.lunch.shortLabel, mealLogged(day, 'lunch'), mealStatusLabels[statusForMeal(day, 'lunch')])}
-      ${stepCard('Dinner', getPlan().meals.dinner.shortLabel, mealLogged(day, 'dinner'), mealStatusLabels[statusForMeal(day, 'dinner')])}
+      ${stepCard('Breakfast', mealForDayDisplay(day, 'breakfast').shortLabel, mealLogged(day, 'breakfast'), mealStatusLabels[statusForMeal(day, 'breakfast')])}
+      ${stepCard('Lunch', mealForDayDisplay(day, 'lunch').shortLabel, mealLogged(day, 'lunch'), mealStatusLabels[statusForMeal(day, 'lunch')])}
+      ${stepCard('Dinner', mealForDayDisplay(day, 'dinner').shortLabel, mealLogged(day, 'dinner'), mealStatusLabels[statusForMeal(day, 'dinner')])}
       ${stepCard('Movement', appState.data.settings.exerciseWindow, ['full','minimum','recovery'].includes(day.exercise.status), exerciseStatusLabels[day.exercise.status] || 'Open', day.exercise.status === 'recovery')}
-      ${stepCard('Routine', `${selectedRoutineLabel()} · ${routineCompletion(day)}%`, routineCompletion(day) >= 60, routineCompletion(day) ? `${routineCompletion(day)}% done` : 'Open')}
+      ${stepCard('Routine', `${routineLabelForDay(day)} · ${routineCompletion(day)}%`, routineCompletion(day) >= 60, routineCompletion(day) ? `${routineCompletion(day)}% done` : 'Open')}
       ${stepCard('Wind-down', 'Calm review before bed', day.windDown.completed, day.windDown.completed ? 'Done' : 'Open')}
     </section>
 
@@ -1629,6 +1436,7 @@ function logFoodItemToday(source, options = {}) {
     source: source.source || options.source || 'Food log'
   };
   const day = getDay();
+  ensureDayPlanSnapshot(day);
   day.meals.customItems.push(item);
   if (MEAL_KEYS.includes(meal) && !day.meals.statuses[meal]) day.meals.statuses[meal] = 'swapped';
   return true;
@@ -1720,7 +1528,7 @@ function renderMeals() {
         <div class="card highlight">
           <div class="card-title">
             <div>
-              <h3>${escapeHtml(plan.planName)}</h3>
+              <h3>${escapeHtml(planNameForDay(day))}</h3>
               <p>Plan vs actual intake, saved swaps, simple calories/protein logging, and an at-this-pace projection.</p>
             </div>
             <span class="badge">${Math.round(totals.loggedCalories).toLocaleString()} kcal logged</span>
@@ -1733,7 +1541,7 @@ function renderMeals() {
           </div>
           <p class="note"><strong>Today:</strong> ${escapeHtml(mealDashboardGuidance(day, totals))}</p>
         </div>
-        ${MEAL_KEYS.map(key => mealEditorCard(key, plan.meals[key], day)).join('')}
+        ${MEAL_KEYS.map(key => mealEditorCard(key, mealForDayDisplay(day, key), day)).join('')}
       </div>
 
       <aside class="grid">
@@ -1766,6 +1574,7 @@ function mealEditorCard(key, meal, day) {
       <span class="badge ${status === 'skipped' ? 'warn' : status ? '' : 'neutral'}">${mealStatusLabels[status]}</span>
     </div>
     <ul class="food-list">${(meal.items || []).map(item => `<li><span>•</span><span>${escapeHtml(item)}</span></li>`).join('')}</ul>
+    ${meal.historicalSnapshot ? `<div class="callout"><strong>Frozen log</strong><p>${escapeHtml(meal.customReplacement ? 'This meal slot was replaced. Its nutrition is preserved in the extra food entries logged for this day.' : 'These meal details and nutrition were captured when the status was logged, so later plan edits will not rewrite this day.')}</p></div>` : ''}
     ${mealRecipeCardHtml(meal)}
     <div class="segmented" role="group" aria-label="${key} status">
       ${['planned', 'swapped', 'skipped'].map(value => `<button data-action="meal-status" data-meal="${key}" data-status="${value}" class="${status === value ? 'active' : ''}">${mealStatusLabels[value]}</button>`).join('')}
@@ -1964,7 +1773,7 @@ function workoutChoiceHelpHtml(workout) {
 }
 
 function routineProgressDetail(day) {
-  const items = routineItemsForSelectedMode();
+  const items = routineItemsForDay(day);
   const done = items.filter(item => day.routine.completedIds[item.id]).length;
   const total = items.length;
   const left = Math.max(0, total - done);
@@ -1973,7 +1782,7 @@ function routineProgressDetail(day) {
 }
 
 function routineNextItemsHtml(day, limit = 4) {
-  const items = routineItemsForSelectedMode();
+  const items = routineItemsForDay(day);
   const next = items.filter(item => !day.routine.completedIds[item.id]).slice(0, limit);
   if (!next.length) return '<p class="note">All visible routine items are done for this mode.</p>';
   return `<ul class="routine-list">${next.map(item => `<li><span>○</span><span>${escapeHtml(item.text)}<br><small class="muted">~${item.minutes || 1} min</small></span><button class="ghost small" style="margin-left:auto" data-action="toggle-routine-item" data-id="${escapeHtml(item.id)}">done</button></li>`).join('')}</ul>`;
@@ -1991,8 +1800,8 @@ function routineDashboardHtml(day) {
     </div>
     <div class="grid three">
       <div class="metric"><span class="value">${detail.done}</span><span class="label">done</span><small>routine items</small></div>
-      <div class="metric"><span class="value">${detail.left}</span><span class="label">left</span><small>${escapeHtml(selectedRoutineLabel())}</small></div>
-      <div class="metric"><span class="value">${detail.total}</span><span class="label">total</span><small>current mode</small></div>
+      <div class="metric"><span class="value">${detail.left}</span><span class="label">left</span><small>${escapeHtml(routineLabelForDay(day))}</small></div>
+      <div class="metric"><span class="value">${detail.total}</span><span class="label">total</span><small>${day.routine?.snapshot ? 'frozen for this day' : 'current mode'}</small></div>
     </div>
     <div style="margin-top:14px;">
       <h3>Next up</h3>
@@ -2004,7 +1813,7 @@ function routineDashboardHtml(day) {
 function renderExercise() {
   setTitle('Exercise');
   const day = getDay();
-  const workout = getWorkoutById(day.exercise.workoutId) || workoutForDate(appState.selectedDate);
+  const workout = workoutForDay(day);
   const suggestion = exerciseSuggestion(day);
   $('#app').innerHTML = `
     <section class="grid sidebar">
@@ -2018,6 +1827,7 @@ function renderExercise() {
             <span class="badge ${suggestion.badge}">${escapeHtml(suggestion.label)}</span>
           </div>
           <p>${escapeHtml(suggestion.message)}</p>
+          ${day.exercise?.snapshot ? '<p class="note"><strong>Frozen workout:</strong> the exercise versions shown for this day are the ones captured when movement was logged or selected.</p>' : ''}
           <div class="input-row three">
             <div class="input-group"><label>Today's workout</label><select data-field="exercise.workoutId">${appState.data.workouts.map(w => `<option value="${escapeHtml(w.id)}" ${day.exercise.workoutId === w.id ? 'selected' : ''}>${escapeHtml(w.title)}</option>`).join('')}</select></div>
             ${selectGroupPath('exercise.intensity', 'Intensity', day.exercise.intensity, ['easy', 'comfortable', 'challenging'])}
@@ -2233,29 +2043,33 @@ function renderRoutines() {
   const day = getDay();
   const modeKey = appState.data.settings.routineMode || 'workday';
   const mode = selectedRoutineMode();
+  const frozen = Boolean(day.routine?.snapshot);
+  const displayLabel = routineLabelForDay(day);
   $('#app').innerHTML = `
     <section class="grid sidebar">
       <div class="grid">
         <div class="card highlight">
           <div class="card-title">
             <div>
-              <h3>Routine builder</h3>
-              <p>Morning/night grooming, oral care, skin care, hand/foot/lip care, and the between-lunch-and-dinner movement block.</p>
+              <h3>Routine for this day</h3>
+              <p>${frozen ? 'This day uses the routine captured when its first item was completed. Template edits will not rewrite it.' : 'No item has been completed yet, so this day is using the current default routine.'}</p>
             </div>
-            <span class="badge">${routineCompletion(day)}% today</span>
+            <span class="badge">${routineCompletion(day)}% · ${escapeHtml(displayLabel)}</span>
           </div>
-          <div class="segmented">
+          <div class="segmented" aria-label="Default routine for new days">
             ${Object.entries(appState.data.routines).map(([key, value]) => `<button data-action="set-setting" data-setting="routineMode" data-value="${key}" class="${modeKey === key ? 'active' : ''}">${escapeHtml(value.label || key)}</button>`).join('')}
           </div>
+          <p class="note">The buttons above choose the default template for days that do not already have a frozen routine.</p>
         </div>
         ${routineDashboardHtml(day)}
         <div class="grid three">
-          ${ROUTINE_BLOCKS.map(block => routineBlockCard(block, mode[block] || [], day)).join('')}
+          ${ROUTINE_BLOCKS.map(block => routineBlockCard(block, routineBlockItemsForDay(day, block), day, frozen)).join('')}
         </div>
       </div>
       <aside class="grid">
         <div class="card">
           <h3>Add routine item</h3>
+          <p class="note">This edits the routine template for future unfrozen days. It does not rewrite a day that already has a snapshot.</p>
           <div class="input-group"><label>Mode</label><select id="routine-mode">${Object.keys(appState.data.routines).map(key => `<option value="${key}" ${key === modeKey ? 'selected' : ''}>${escapeHtml(appState.data.routines[key].label || key)}</option>`).join('')}</select></div>
           <div class="input-group" style="margin-top:10px;"><label>Block</label><select id="routine-block">${ROUTINE_BLOCKS.map(key => `<option value="${key}">${routineBlockLabel(key)}</option>`).join('')}</select></div>
           <div class="input-group" style="margin-top:10px;"><label>Item</label><input id="routine-text" placeholder="Example: Lay out workout clothes" /></div>
@@ -2270,12 +2084,13 @@ function renderRoutines() {
     </section>`;
 }
 
-function routineBlockCard(block, items, day) {
+function routineBlockCard(block, items, day, frozen = false) {
   return `<div class="card flat">
     <div class="card-title"><h3>${routineBlockLabel(block)}</h3><span class="badge neutral">${items.filter(item => day.routine.completedIds[item.id]).length}/${items.length}</span></div>
     <ul class="routine-list">
-      ${items.map(item => `<li class="${day.routine.completedIds[item.id] ? 'done' : ''}"><span>${day.routine.completedIds[item.id] ? '✓' : '○'}</span><span>${escapeHtml(item.text)}<br><small class="muted">~${item.minutes || 1} min</small></span><button class="ghost small" style="margin-left:auto" data-action="toggle-routine-item" data-id="${escapeHtml(item.id)}">${day.routine.completedIds[item.id] ? 'undo' : 'done'}</button><button class="danger small" data-action="remove-routine-item" data-block="${block}" data-id="${escapeHtml(item.id)}">×</button></li>`).join('')}
+      ${items.map(item => `<li class="${day.routine.completedIds[item.id] ? 'done' : ''}"><span>${day.routine.completedIds[item.id] ? '✓' : '○'}</span><span>${escapeHtml(item.text)}<br><small class="muted">~${item.minutes || 1} min</small></span><button class="ghost small" style="margin-left:auto" data-action="toggle-routine-item" data-id="${escapeHtml(item.id)}">${day.routine.completedIds[item.id] ? 'undo' : 'done'}</button>${frozen ? '' : `<button class="danger small" data-action="remove-routine-item" data-block="${block}" data-id="${escapeHtml(item.id)}">×</button>`}</li>`).join('')}
     </ul>
+    ${!items.length ? '<p class="note">No items in this block.</p>' : ''}
   </div>`;
 }
 
@@ -2711,11 +2526,39 @@ function storageCandidateSummary(label, raw) {
 }
 
 function storageDiagnostics() {
+  const foundation = foundationDiagnosticsCache || {};
+  const pointerRaw = safeLocalGet(FOUNDATION_POINTER_KEY);
+  const shellRaw = safeLocalGet(FOUNDATION_EMERGENCY_SHELL_KEY);
+  const legacy = storageCandidateSummary('Legacy 1.0.1 rollback copy', safeLocalGet(STORAGE_KEY));
   return [
-    storageCandidateSummary('localStorage primary', safeLocalGet(STORAGE_KEY)),
-    storageCandidateSummary('localStorage backup', safeLocalGet(STORAGE_BACKUP_KEY)),
-    storageCandidateSummary('sessionStorage refresh fallback', safeSessionGet(SESSION_STORAGE_KEY)),
-    storageCandidateSummary('pre-import safety backup', safeLocalGet(PRE_IMPORT_BACKUP_KEY))
+    {
+      label: 'IndexedDB foundation',
+      exists: Boolean(foundation.primaryExists),
+      version: APP_VERSION,
+      updatedAt: foundation.updatedAt || '',
+      days: Number(foundation.dayCount || 0),
+      meaningfulDays: Object.values(appState.data.days || {}).filter(dayHasUserData).length,
+      bytes: 0
+    },
+    {
+      label: 'Last-known-good backups',
+      exists: Number(foundation.backupCount || 0) > 0,
+      version: `${Number(foundation.backupCount || 0)} rotating`,
+      updatedAt: foundation.newestBackupAt || '',
+      days: Number(foundation.backupCount || 0),
+      meaningfulDays: Number(foundation.backupCount || 0),
+      bytes: 0
+    },
+    {
+      label: 'Emergency local metadata',
+      exists: Boolean(foundation.pointerExists && foundation.emergencyShellExists),
+      version: `foundation schema ${FOUNDATION_SCHEMA_VERSION}`,
+      updatedAt: foundation.pointer?.updatedAt || '',
+      days: Number(foundation.pointer?.dayCount || 0),
+      meaningfulDays: Number(foundation.pointer?.dayCount || 0),
+      bytes: (pointerRaw?.length || 0) + (shellRaw?.length || 0)
+    },
+    legacy
   ];
 }
 
@@ -2737,7 +2580,7 @@ function storageDiagnosticsRowsHtml() {
     <div class="storage-row">
       <div>
         <strong>${escapeHtml(item.label)}</strong>
-        <small>${item.exists ? `${item.meaningfulDays}/${item.days} meaningful days · version ${escapeHtml(item.version || 'unknown')}` : 'not found'}</small>
+        <small>${item.exists ? `${item.label === 'Last-known-good backups' ? `${item.days} recovery copies` : `${item.meaningfulDays}/${item.days} meaningful days`} · ${escapeHtml(item.version || 'unknown')}` : 'not found'}</small>
       </div>
       <div class="right-text">
         <small>${escapeHtml(formatBytes(item.bytes))}</small>
@@ -2792,7 +2635,7 @@ function storageDebugCardHtml() {
     <div class="stack small-stack">
       ${storageDiagnosticsRowsHtml()}
     </div>
-    ${storageLastError ? `<p class="note"><strong>Last storage warning:</strong> ${escapeHtml(storageLastError)}</p>` : '<p class="note">Primary, backup, and refresh fallback are checked without changing your data.</p>'}
+    ${storageLastError ? `<p class="note"><strong>Last storage warning:</strong> ${escapeHtml(storageLastError)}</p>` : '<p class="note">The IndexedDB foundation, rotating backups, emergency metadata, and legacy rollback copy are checked without changing your data.</p>'}
   </div>`;
 }
 
@@ -2823,56 +2666,15 @@ async function copyStorageDebugInfo() {
   await copyTextWithFallback(text, 'Debug info copied', 'Pathfinder storage debug info');
 }
 
-function runSaveTest() {
-  const primaryTestKey = 'pathfinder.save-test.primary.v1';
-  const backupTestKey = 'pathfinder.save-test.backup.v1';
-  const sessionTestKey = 'pathfinder.save-test.session.v1';
-  const payload = JSON.stringify({
-    app: 'Pathfinder',
-    version: APP_VERSION,
-    writtenAt: new Date().toISOString(),
-    random: Math.random().toString(36).slice(2)
-  });
-
-  const results = [];
-  let primaryPassed = false;
-  let backupPassed = false;
-  let sessionPassed = false;
-
-  try {
-    localStorage.setItem(primaryTestKey, payload);
-    primaryPassed = localStorage.getItem(primaryTestKey) === payload;
-    results.push(primaryPassed ? 'primary localStorage passed' : 'primary localStorage failed verification');
-    localStorage.removeItem(primaryTestKey);
-  } catch (error) {
-    results.push(`primary localStorage failed: ${error.message || error}`);
-  }
-
-  try {
-    localStorage.setItem(backupTestKey, payload);
-    backupPassed = localStorage.getItem(backupTestKey) === payload;
-    results.push(backupPassed ? 'backup localStorage passed' : 'backup localStorage failed verification');
-    localStorage.removeItem(backupTestKey);
-  } catch (error) {
-    results.push(`backup localStorage failed: ${error.message || error}`);
-  }
-
-  try {
-    sessionStorage.setItem(sessionTestKey, payload);
-    sessionPassed = sessionStorage.getItem(sessionTestKey) === payload;
-    results.push(sessionPassed ? 'sessionStorage passed' : 'sessionStorage failed verification');
-    sessionStorage.removeItem(sessionTestKey);
-  } catch (error) {
-    results.push(`sessionStorage failed: ${error.message || error}`);
-  }
-
-  const durablePassed = primaryPassed && backupPassed;
-  const status = durablePassed ? 'passed' : sessionPassed ? 'degraded' : 'failed';
+async function runSaveTest() {
+  const result = await runFoundationSaveTest();
   appState.data.settings.lastSaveTestAt = new Date().toISOString();
-  appState.data.settings.lastSaveTestResult = `${status} · ${results.join(' · ')}`;
-  saveState();
+  appState.data.settings.lastSaveTestResult = `${result.status} · ${result.details.join(' · ')}`;
+  saveState({ immediate: true });
+  await flushFoundationSave(() => appState.data);
+  await refreshFoundationDiagnostics();
   render();
-  showToast(status === 'passed' ? 'Save test passed' : status === 'degraded' ? 'Save test degraded: export a backup' : 'Save test failed');
+  showToast(result.status === 'passed' ? 'Foundation save test passed' : result.status === 'degraded' ? 'Save test degraded: export a backup' : 'Foundation save test failed');
 }
 
 function appInstallStatus() {
@@ -3160,9 +2962,10 @@ function getWorkoutById(id) {
 }
 
 function recommendedWorkout(day) {
+  if (day?.exercise?.snapshot) return day.exercise.snapshot;
   const suggestion = exerciseSuggestion(day);
-  if (suggestion.forceRecovery) return getWorkoutById('weekly-reset') || workoutForDate(appState.selectedDate);
-  return getWorkoutById(day.exercise.workoutId) || workoutForDate(appState.selectedDate);
+  if (suggestion.forceRecovery) return getWorkoutById('weekly-reset') || workoutForDate(day?.key || appState.selectedDate);
+  return getWorkoutById(day?.exercise?.workoutId) || workoutForDate(day?.key || appState.selectedDate);
 }
 
 function workoutSuggestionSteps(day, workout) {
@@ -3416,7 +3219,7 @@ function buildAiReviewPacket(stats) {
       weight: day.weight,
       note: day.dailyNote || day.checkin.notes || day.exercise.notes || day.windDown.note || ''
     })),
-    request: 'Give Joshua a practical weekly review: what went well, what got in the way, likely weight/progress direction, and one small next-week adjustment. Be honest but not shaming.'
+    request: `Give ${appState.data.settings.name || 'the user'} a practical weekly review: what went well, what got in the way, likely weight/progress direction, and one small next-week adjustment. Be honest but not shaming.`
   };
   return JSON.stringify(packet, null, 2);
 }
@@ -3696,11 +3499,11 @@ function handleImport(file) {
         return;
       }
       preservePreImportBackup();
-      const merged = mergeDefaults(defaultState(), parsed);
-      migrateState(merged);
-      merged.version = APP_VERSION;
+      createFoundationBackup(appState.data, 'pre-import').catch(error => console.warn('Pre-import foundation backup failed:', error));
+      const merged = prepareStateCandidate(parsed);
       appState.data = merged;
-      saveState();
+      dirtyDayKeys = new Set(Object.keys(merged.days || {}));
+      saveState({ allDays: true, forceBackup: true, backupReason: 'post-import', immediate: true });
       showToast('Backup imported safely');
       render();
     } catch (error) {
@@ -3761,7 +3564,13 @@ function wireEvents() {
     const mealNote = target.dataset.mealNote;
     if (mealNote) { const day = getDay(); day.meals.notes[mealNote] = target.value; saveState(); return; }
     const mealSwap = target.dataset.mealSwap;
-    if (mealSwap) { const day = getDay(); day.meals.swaps[mealSwap] = target.value; if (target.value && !day.meals.statuses[mealSwap]) day.meals.statuses[mealSwap] = 'swapped'; saveState(); render(); }
+    if (mealSwap) {
+      const day = getDay();
+      day.meals.swaps[mealSwap] = target.value;
+      if (target.value && !day.meals.statuses[mealSwap]) day.meals.statuses[mealSwap] = 'swapped';
+      if (day.meals.statuses[mealSwap] === 'swapped') captureMealSnapshotForDay(day, mealSwap);
+      saveState(); render();
+    }
   });
 
   document.addEventListener('input', event => {
@@ -3801,12 +3610,18 @@ function handleAction(action) {
       day.exercise.status = status;
       day.exercise.version = status;
       day.exercise.completed = ['full','minimum','recovery'].includes(status);
+      captureWorkoutSnapshotForDay(day);
       if (!day.exercise.minutes) day.exercise.minutes = status === 'full' ? 25 : status === 'minimum' ? 5 : status === 'recovery' ? 5 : '';
       saveState(); render(); showToast(exerciseStatusLabels[status] || 'Movement logged'); break;
     }
     case 'meal-status': {
       const day = getDay();
-      day.meals.statuses[action.dataset.meal] = action.dataset.status;
+      const mealKey = action.dataset.meal;
+      const nextStatus = action.dataset.status;
+      const previousStatus = day.meals.statuses[mealKey] || '';
+      day.meals.statuses[mealKey] = nextStatus;
+      const snapshot = day.meals.snapshots?.[mealKey];
+      if (previousStatus !== nextStatus || !snapshot || snapshot.status !== nextStatus) captureMealSnapshotForDay(day, mealKey);
       saveState(); render(); break;
     }
     case 'toggle': togglePath(action.dataset.path); break;
@@ -3839,6 +3654,7 @@ function handleAction(action) {
     case 'choose-workout': {
       const day = getDay();
       day.exercise.workoutId = action.dataset.id;
+      captureWorkoutSnapshotForDay(day, true);
       saveState(); render(); showToast('Workout selected'); break;
     }
     case 'open-guide': appState.selectedGuideId = action.dataset.guideId || 'chair-sit-to-stand'; appState.activeTab = 'guide'; render(); break;
@@ -3847,6 +3663,7 @@ function handleAction(action) {
     case 'toggle-setting': appState.data.settings[action.dataset.setting] = !appState.data.settings[action.dataset.setting]; saveState(); render(); break;
     case 'toggle-routine-item': {
       const day = getDay();
+      captureRoutineSnapshotForDay(day, false, action.dataset.id);
       day.routine.completedIds[action.dataset.id] = !day.routine.completedIds[action.dataset.id];
       saveState(); render(); break;
     }
@@ -3860,7 +3677,7 @@ function handleAction(action) {
     case 'copy-companion-packet': copyCompanionPacket(); break;
     case 'export-csv': exportCsv(); break;
     case 'export-json': exportJson(); break;
-    case 'reset-app': if (confirm('Reset Pathfinder data on this browser?')) { appState.data = defaultState(); saveState(); render(); showToast('Reset complete'); } break;
+    case 'reset-app': if (confirm('Reset Pathfinder data on this browser?')) { createFoundationBackup(appState.data, 'pre-reset').catch(console.warn); appState.data = defaultState(); saveState({ allDays: true, forceBackup: true, backupReason: 'post-reset' }); render(); showToast('Reset complete'); } break;
     case 'select-date': appState.selectedDate = action.dataset.date; appState.activeTab = 'today'; render(); break;
     default: break;
   }
@@ -3871,6 +3688,7 @@ function updateDayField(path, value, rerender = true) {
   const numericPaths = ['weight', 'checkin.water', 'windDown.calmMinutes', 'exercise.minutes'];
   setNested(day, path, numericPaths.includes(path) && value !== '' ? Number(value) : value);
   if (path === 'exercise.status') day.exercise.completed = ['full','minimum','recovery'].includes(value);
+  if (path.startsWith('exercise.')) captureWorkoutSnapshotForDay(day);
   saveState();
   if (rerender) render();
 }
@@ -4084,8 +3902,8 @@ function addRoutineItem() {
 function removeRoutineItem(block, id) {
   const mode = selectedRoutineMode();
   mode[block] = (mode[block] || []).filter(item => item.id !== id);
-  Object.values(appState.data.days).forEach(day => { if (day.routine?.completedIds) delete day.routine.completedIds[id]; });
-  saveState(); render(); showToast('Routine item removed');
+  // Historical completions remain attached to each day's routine snapshot.
+  saveState(); render(); showToast('Routine item removed; past history preserved');
 }
 
 function registerServiceWorker() {
@@ -4094,12 +3912,23 @@ function registerServiceWorker() {
   }
 }
 
-wireEvents();
-window.addEventListener('online', () => showToast('Pathfinder is online'));
-window.addEventListener('offline', () => showToast('Pathfinder is offline. Local data still works.'));
-render();
-registerServiceWorker();
-requestPersistentStorage();
-hydrateFromIndexedDb();
-window.addEventListener('pagehide', flushStateOnPageLeave);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushStateOnPageLeave(); });
+async function startPathfinder() {
+  try {
+    await hydrateFromDataFoundation();
+  } catch (error) {
+    storageLastError = error.message || String(error);
+    console.error('Pathfinder 1.1 foundation startup failed; using validated fallback state:', error);
+    appState.data = prepareStateCandidate(appState.data);
+  }
+  normalizeRuntimeState();
+  wireEvents();
+  window.addEventListener('online', () => showToast('Pathfinder is online'));
+  window.addEventListener('offline', () => showToast('Pathfinder is offline. Local data still works.'));
+  render();
+  registerServiceWorker();
+  requestPersistentStorage();
+  window.addEventListener('pagehide', flushStateOnPageLeave);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushStateOnPageLeave(); });
+}
+
+startPathfinder();

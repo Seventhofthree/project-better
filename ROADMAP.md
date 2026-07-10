@@ -20,21 +20,23 @@ No new capability automatically earns a top-level tab. New depth should appear i
 
 Fix the known 1.0 correctness, privacy, import, CSV, documentation, and blank-record issues without redesigning storage.
 
-Status: current maintenance release.
+**Status: completed and passed.**
 
 ## 1.1 — Durable Data Foundation
 
 - Snapshot meal nutrition when logged
-- Snapshot or version routine and workout definitions
-- Keep historical meaning immutable
+- Snapshot routine and workout definitions
+- Keep historical meaning immutable going forward
 - Validate and migrate storage candidates one at a time
 - Fall back to healthy backups
 - Add rotating last-known-good backups
 - Store daily records separately in IndexedDB
 - Debounce text saves
 - Preserve complete import/export
-- Split the large app source into native modules
-- Add automated storage, migration, calculation, and rendering tests
+- Split storage and history logic into native modules
+- Add automated storage, migration, calculation, startup, and rendering tests
+
+**Status: current release under user verification.**
 
 ## 1.2 — Calm Navigation
 
@@ -47,6 +49,8 @@ Consolidate eleven tabs into:
 - Settings
 
 Existing features remain available as nested views.
+
+**Status: next.**
 
 ## 1.3 — Today-First Daily Flow
 
