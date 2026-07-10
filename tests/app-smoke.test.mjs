@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeIndexedDb, installFakeLocalStorage } from './fake-indexeddb.mjs';
 
-test('Pathfinder 1.2 starts, renders Today, and opens nested sections with foundation diagnostics', async () => {
+test('Pathfinder 1.2.1 starts, renders Today, and opens nested sections with foundation diagnostics', async () => {
   installFakeIndexedDb();
   installFakeLocalStorage();
   const sessionValues = new Map();
@@ -51,7 +51,7 @@ test('Pathfinder 1.2 starts, renders Today, and opens nested sections with found
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.2 Calm Navigation', coreAppVersion: '1.2', serviceWorkerCache: 'pathfinder-1.2' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.2.1 Calm Navigation', coreAppVersion: '1.2.1', serviceWorkerCache: 'pathfinder-1.2.1' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -89,7 +89,7 @@ test('Pathfinder 1.2 starts, renders Today, and opens nested sections with found
     }
   });
 
-  assert.match(elements.get('app').innerHTML, /Pathfinder 1\.2 Calm Navigation/);
+  assert.match(elements.get('app').innerHTML, /Pathfinder 1\.2\.1 Calm Navigation/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.1 Durable Data Foundation/);
   assert.match(elements.get('app').innerHTML, /IndexedDB foundation/);
   assert.match(elements.get('app').innerHTML, /Last-known-good backups/);

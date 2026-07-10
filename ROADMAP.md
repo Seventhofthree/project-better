@@ -48,7 +48,7 @@ Consolidate eleven tabs into:
 - Progress
 - Settings
 
-Existing features remain available as nested views.
+Existing features remain available as nested views. The 1.2.1 polish keeps Today, Food, Movement, and Progress together as daily navigation while moving Settings to a separate upper-right gear.
 
 **Status: current release under user verification.**
 

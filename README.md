@@ -1,19 +1,20 @@
-# Pathfinder 1.2
+# Pathfinder 1.2.1
 
 Pathfinder is a local-first daily companion for food, movement, routines, progress, and review.
 
 ## Current release
 
-**1.2 — Calm Navigation**
+**1.2.1 — Calm Navigation Hierarchy Polish**
 
-This release reduces eleven visible feature tabs to five clear destinations without removing any existing capability:
+This release keeps the 1.2 consolidation while clarifying which destinations are used every day:
 
 ```text
 Today
 Food
 Movement
 Progress
-Settings
+
+Settings remains available from a separate gear button.
 ```
 
 ### Where everything moved
@@ -26,11 +27,11 @@ Settings
 
 Each section has a small nested view switcher. Existing internal jump buttons still open the correct nested destination.
 
-On phone-sized screens, the five primary destinations move to a compact bottom navigation bar. Desktop keeps the primary navigation near the top.
+On phone-sized screens, the four daily destinations move to a compact bottom navigation bar while Settings remains in the header. Desktop keeps the four daily destinations together beneath the date controls, with Settings alone in the upper-right.
 
 ## Data foundation
 
-Pathfinder 1.2 keeps the passed 1.1 durable data foundation unchanged:
+Pathfinder 1.2.1 keeps the passed 1.1 durable data foundation unchanged:
 
 - Separate IndexedDB daily records
 - Immutable meal, routine, and workout snapshots
@@ -40,7 +41,7 @@ Pathfinder 1.2 keeps the passed 1.1 durable data foundation unchanged:
 - Debounced text-entry saves
 - Complete JSON import and export
 
-There is no 1.2 data-schema migration. Existing 1.1 data should open unchanged.
+There is no 1.2.1 data-schema migration. Existing 1.1 data should open unchanged.
 
 ## Privacy
 
@@ -87,7 +88,7 @@ Or run syntax checks and all tests:
 npm run check
 ```
 
-The test suite covers the 1.1 storage foundation, historical snapshots, legacy migration, startup rendering, and the complete 1.2 navigation map.
+The test suite covers the 1.1 storage foundation, historical snapshots, legacy migration, startup rendering, and the complete 1.2.1 navigation hierarchy.
 
 ## Deployment
 

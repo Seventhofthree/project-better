@@ -1,5 +1,5 @@
-/* Pathfinder 1.2
-   Calm Navigation release built on the passed 1.1 durable data foundation.
+/* Pathfinder 1.2.1
+   Calm Navigation hierarchy polish built on the passed 1.1 durable data foundation.
    Eleven feature tabs are consolidated into five primary destinations while
    preserving every existing view as a nested destination.
 */
@@ -49,7 +49,7 @@ import {
   sectionForView
 } from './navigation.js';
 
-const APP_VERSION = '1.2';
+const APP_VERSION = '1.2.1';
 const APP_DATA_SCHEMA_VERSION = 2;
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
@@ -785,7 +785,7 @@ function releaseReadinessCardHtml() {
       <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '1.2' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)} · data schema ${APP_DATA_SCHEMA_VERSION}</span></li>
+      <li><span>${APP_VERSION === '1.2.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)} · data schema ${APP_DATA_SCHEMA_VERSION}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
@@ -883,7 +883,7 @@ function render() {
   applyCompactModeClass();
   $('#date-picker').value = appState.selectedDate;
   const activeSection = sectionForView(appState.activeTab);
-  $$('.tabs button').forEach(button => button.classList.toggle('active', button.dataset.section === activeSection));
+  $$('[data-section]').forEach(button => button.classList.toggle('active', button.dataset.section === activeSection));
   const renderers = { today: renderToday, meals: renderMeals, food: renderFood, exercise: renderExercise, guide: renderGuide, routines: renderRoutines, assistant: renderAssistant, progress: renderProgress, review: renderReview, history: renderHistory, settings: renderSettings };
   try {
     const renderer = renderers[appState.activeTab] || renderToday;
@@ -2740,7 +2740,12 @@ function injectMobilePwaStyles() {
     .section-kicker { color: var(--accent); font-size: .76rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
     .section-view-tabs { margin: 0; justify-content: flex-end; }
     .section-view-tabs button { min-height: var(--tap-target); }
-    .primary-tabs .settings-label { margin-left: 4px; }
+    .topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 18px; }
+    .topbar-main { display: grid; gap: 16px; min-width: 0; }
+    .topbar-main .date-controls { justify-content: flex-start; }
+    .topbar-settings { width: var(--tap-target); height: var(--tap-target); min-width: var(--tap-target); padding: 0; display: grid; place-items: center; border-radius: 50%; font-size: 1.05rem; }
+    .topbar-settings.active { background: var(--accent); color: #102018; border-color: transparent; }
+    .tabs.primary-tabs { width: max-content; max-width: 100%; }
     .toggle-row.tight { gap: 8px; }
     .companion-card { scroll-margin-top: 90px; }
     body.compact-mode .card { padding: 14px; }
@@ -2750,12 +2755,12 @@ function injectMobilePwaStyles() {
     @media (max-width: 720px) {
       body { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
       .app-shell { width: min(100%, 100vw); padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
-      .topbar { gap: 12px; align-items: flex-start; }
+      .topbar { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+      .topbar-main { gap: 12px; }
       .date-controls { width: 100%; display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px 70px; gap: 8px; }
       .date-controls input[type="date"] { min-width: 0; width: 100%; }
-      .tabs.primary-tabs { position: fixed; inset: auto 0 0 0; z-index: 50; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 54px; gap: 6px; margin: 0; padding: 8px max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid var(--line); background: rgba(16,24,21,.96); backdrop-filter: blur(14px); box-shadow: 0 -12px 34px rgba(0,0,0,.28); }
+      .tabs.primary-tabs { position: fixed; inset: auto 0 0 0; z-index: 50; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; max-width: none; gap: 6px; margin: 0; padding: 8px max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid var(--line); background: rgba(16,24,21,.96); backdrop-filter: blur(14px); box-shadow: 0 -12px 34px rgba(0,0,0,.28); }
       .tabs.primary-tabs button { min-width: 0; padding: 10px 6px; font-size: .82rem; text-align: center; overflow: hidden; text-overflow: ellipsis; }
-      .tabs.primary-tabs .settings-label { display: none; }
       .toast { bottom: calc(82px + env(safe-area-inset-bottom)); }
       .section-navigation { display: grid; gap: 10px; padding: 10px 12px; }
       .section-navigation-copy { min-width: 0; }
@@ -2820,13 +2825,13 @@ function calmNavigationReleaseCardHtml() {
   return `<div class="card highlight">
     <div class="card-title">
       <div>
-        <h3>Pathfinder 1.2 Calm Navigation</h3>
-        <p>Eleven visible feature tabs are now organized inside five clear destinations.</p>
+        <h3>Pathfinder 1.2.1 Calm Navigation</h3>
+        <p>Four daily destinations stay together while Settings is separated as an occasional utility.</p>
       </div>
       <span class="badge blue">Calmer layout</span>
     </div>
     <div class="grid three">
-      <div class="metric"><span class="value">5</span><span class="label">primary destinations</span><small>down from eleven</small></div>
+      <div class="metric"><span class="value">4 + ⚙</span><span class="label">navigation hierarchy</span><small>daily areas + Settings</small></div>
       <div class="metric"><span class="value">11</span><span class="label">feature views preserved</span><small>nothing removed</small></div>
       <div class="metric"><span class="value">${escapeHtml(sectionDefinition(activeSection).label)}</span><span class="label">current section</span><small>nested view: ${escapeHtml(appState.activeTab)}</small></div>
     </div>
@@ -2835,7 +2840,7 @@ function calmNavigationReleaseCardHtml() {
       <li><span>✓</span><span>Food contains today’s logging plus the meal plan and food library.</span></li>
       <li><span>✓</span><span>Movement contains today’s workout and the exercise guide.</span></li>
       <li><span>✓</span><span>Progress contains overview, reviews, and history.</span></li>
-      <li><span>✓</span><span>Settings remains separate from everyday navigation.</span></li>
+      <li><span>✓</span><span>Settings now sits alone in the upper-right, outside everyday navigation.</span></li>
     </ul>
     <p class="note">The 1.1 IndexedDB foundation, historical snapshots, backups, imports, and exports are unchanged underneath this navigation release.</p>
   </div>`;
@@ -3994,7 +3999,7 @@ async function startPathfinder() {
     await hydrateFromDataFoundation();
   } catch (error) {
     storageLastError = error.message || String(error);
-    console.error('Pathfinder 1.2 foundation startup failed; using validated fallback state:', error);
+    console.error('Pathfinder 1.2.1 foundation startup failed; using validated fallback state:', error);
     appState.data = prepareStateCandidate(appState.data);
   }
   normalizeRuntimeState();

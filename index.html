@@ -7,35 +7,37 @@
   <title>Pathfinder</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=1.2" />
+  <link rel="stylesheet" href="styles.css?v=1.2.1" />
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div>
-        <p class="eyebrow">Pathfinder</p>
-        <h1 id="page-title">Today</h1>
+      <div class="topbar-main">
+        <div>
+          <p class="eyebrow">Pathfinder</p>
+          <h1 id="page-title">Today</h1>
+        </div>
+        <div class="date-controls" aria-label="Date controls">
+          <button class="ghost small" id="prev-day" title="Previous day">‹</button>
+          <input type="date" id="date-picker" aria-label="Selected date" />
+          <button class="ghost small" id="next-day" title="Next day">›</button>
+          <button class="ghost small" id="today-btn">Today</button>
+        </div>
       </div>
-      <div class="date-controls" aria-label="Date controls">
-        <button class="ghost small" id="prev-day" title="Previous day">‹</button>
-        <input type="date" id="date-picker" aria-label="Selected date" />
-        <button class="ghost small" id="next-day" title="Next day">›</button>
-        <button class="ghost small" id="today-btn">Today</button>
-      </div>
+      <button class="ghost topbar-settings" data-section="settings" aria-label="Open Settings" title="Settings"><span aria-hidden="true">⚙</span></button>
     </header>
 
-    <nav class="tabs primary-tabs" aria-label="Primary navigation">
+    <nav class="tabs primary-tabs" aria-label="Daily navigation">
       <button data-section="today" class="active">Today</button>
       <button data-section="food">Food</button>
       <button data-section="movement">Movement</button>
       <button data-section="progress">Progress</button>
-      <button data-section="settings" aria-label="Settings" title="Settings"><span aria-hidden="true">⚙</span><span class="settings-label">Settings</span></button>
     </nav>
 
     <main id="app" tabindex="-1">
       <section class="card highlight">
         <h2>Loading Pathfinder…</h2>
-        <p>Starting Pathfinder 1.2 calm navigation.</p>
+        <p>Starting Pathfinder 1.2.1 navigation polish.</p>
       </section>
     </main>
   </div>
@@ -46,12 +48,12 @@
 
   <script>
     window.__PATHFINDER_RELEASE__ = {
-      release: '1.2 Calm Navigation',
+      release: '1.2.1 Calm Navigation',
       bootstrapVersion: 'removed',
-      coreAppVersion: '1.2',
-      serviceWorkerCache: 'pathfinder-1.2'
+      coreAppVersion: '1.2.1',
+      serviceWorkerCache: 'pathfinder-1.2.1'
     };
   </script>
-  <script type="module" src="app.js?v=1.2"></script>
+  <script type="module" src="app.js?v=1.2.1"></script>
 </body>
 </html>
