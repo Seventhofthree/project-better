@@ -1,10 +1,10 @@
-/* Pathfinder 0.9.8.1
+/* Pathfinder 0.9.9
    Local-first daily companion app. No account, no server, no dependencies.
-   0.9.8.1 is a Settings Hotfix release built from the 0.9.8 bug sweep.
-   Fixes the Release readiness card crash without changing persistence.
+   0.9.9 is a Release Candidate built from the passed 0.9.8.1 Settings Hotfix.
+   Adds final readiness cleanup and render fallback without changing persistence.
 */
 
-const APP_VERSION = '0.9.8.1';
+const APP_VERSION = '0.9.9';
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
 const SESSION_STORAGE_KEY = 'pathfinder.state.v8.session';
@@ -963,12 +963,12 @@ function releaseReadinessCardHtml() {
     <div class="card-title">
       <div>
         <h3>Release readiness</h3>
-        <p>Quick check for common update problems before moving to the next patch.</p>
+        <p>Quick check for common update problems before calling this a release candidate.</p>
       </div>
       <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '0.9.8.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
+      <li><span>${APP_VERSION === '0.9.9' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
@@ -987,6 +987,48 @@ async function copyAiSummaryPacket() {
   await copyTextWithFallback(buildAiReviewPacket(weeklyStats(appState.selectedDate)), 'AI packet copied', 'Pathfinder AI review packet');
 }
 
+
+function renderTabFallback(error) {
+  const message = error?.message || String(error || 'Unknown render error');
+  const activeTab = APP_TABS.includes(appState.activeTab) ? appState.activeTab : 'today';
+  $('#app').innerHTML = `<section class="card warning">
+    <div class="card-title">
+      <div>
+        <h3>Pathfinder caught a display problem</h3>
+        <p>The app data was not changed. Try another tab or refresh.</p>
+      </div>
+      <span class="badge warn">Display guard</span>
+    </div>
+    <p><strong>Tab:</strong> ${escapeHtml(activeTab)}</p>
+    <p class="note">${escapeHtml(message)}</p>
+    <div class="toggle-row">
+      <button class="primary" data-action="jump" data-tab-target="today">Go to Today</button>
+      <button class="secondary" data-action="jump" data-tab-target="settings">Go to Settings</button>
+      <button class="ghost" data-action="copy-storage-debug">Copy debug info</button>
+    </div>
+  </section>`;
+  console.error('Pathfinder render fallback:', error);
+}
+
+function releaseCandidateCardHtml() {
+  return `<div class="card highlight">
+    <div class="card-title">
+      <div>
+        <h3>0.9.9 Release Candidate</h3>
+        <p>This is the last full-app check before calling Pathfinder 1.0 stable.</p>
+      </div>
+      <span class="badge blue">RC</span>
+    </div>
+    <ul class="check-list mini-list">
+      <li><span>✓</span><span>No save-system changes in this release.</span></li>
+      <li><span>✓</span><span>Settings crash from 0.9.8 stayed fixed.</span></li>
+      <li><span>✓</span><span>Render fallback added for safer tab display.</span></li>
+      <li><span>✓</span><span>Root repo cleanup completed before RC build.</span></li>
+    </ul>
+    <p class="note">Pass this only after checking Today, Meals, Food, Exercise, Routines, Assistant, Progress, Review, History, and Settings.</p>
+  </div>`;
+}
+
 function render() {
   normalizeRuntimeState();
   injectMobilePwaStyles();
@@ -994,7 +1036,12 @@ function render() {
   $('#date-picker').value = appState.selectedDate;
   $$('.tabs button').forEach(button => button.classList.toggle('active', button.dataset.tab === appState.activeTab));
   const renderers = { today: renderToday, meals: renderMeals, food: renderFood, exercise: renderExercise, guide: renderGuide, routines: renderRoutines, assistant: renderAssistant, progress: renderProgress, review: renderReview, history: renderHistory, settings: renderSettings };
-  renderers[appState.activeTab]();
+  try {
+    const renderer = renderers[appState.activeTab] || renderToday;
+    renderer();
+  } catch (error) {
+    renderTabFallback(error);
+  }
 }
 
 function guidanceButtonHtml(guidance) {
@@ -2938,6 +2985,7 @@ function renderSettings() {
         ${mobileTipsCardHtml()}
         ${updateReadyCardHtml()}
         ${releaseReadinessCardHtml()}
+        ${releaseCandidateCardHtml()}
         ${storageDebugCardHtml()}
         <div class="card">
           <h3>Storage status</h3>
