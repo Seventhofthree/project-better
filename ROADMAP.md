@@ -4,67 +4,59 @@
 
 Pathfinder should become deeper, calmer, and more useful rather than wider.
 
-Target navigation:
-
 ```text
 Today
 Food
 Movement
 Progress
-Settings
+⚙ Settings
 ```
 
-No new capability automatically earns a top-level tab. New depth should appear inside the four main sections or only when context makes it relevant.
+New depth should appear inside these sections or only when context makes it relevant.
 
-## 1.0.1 — Correctness and Safety
+## Completed and passed
 
-Fix the known 1.0 correctness, privacy, import, CSV, documentation, and blank-record issues without redesigning storage.
-
-**Status: completed and passed.**
-
-## 1.1 — Durable Data Foundation
-
-- Snapshot meal nutrition when logged
-- Snapshot routine and workout definitions
-- Keep historical meaning immutable going forward
-- Validate and migrate storage candidates one at a time
-- Fall back to healthy backups
-- Add rotating last-known-good backups
-- Store daily records separately in IndexedDB
-- Debounce text saves
-- Preserve complete import/export
-- Split storage and history logic into native modules
-- Add automated storage, migration, calculation, startup, and rendering tests
-
-**Status: completed and passed.**
-
-## 1.2 — Calm Navigation
-
-Consolidate eleven tabs into:
-
-- Today
-- Food
-- Movement
-- Progress
-- Settings
-
-Existing features remain available as nested views. The 1.2.1 polish keeps Today, Food, Movement, and Progress together as daily navigation while moving Settings to a separate upper-right gear.
-
-**Status: current release under user verification.**
+- **1.0.1 — Correctness and Safety**
+- **1.1 — Durable Data Foundation**
+- **1.2 — Calm Navigation**
+- **1.2.1 — Navigation Hierarchy Polish**
 
 ## 1.3 — Today-First Daily Flow
 
+- Time-aware Morning, Afternoon, Evening, and Saved-day modes
+- Current priority and explanation at the top of Today
+- Prominent calories-remaining budget
+- Meal-status logging directly from Today
+- Full, minimum, and recovery movement logging from Today
+- Current routine block and completion buttons
+- Quick check-in and water controls
+- Evening wind-down and recap
+- Completed, future, and supporting detail collapsed when it is not the priority
+
+**Status: current release under user verification.**
+
+## 1.4 — Food Depth & Calorie Tracking
+
+Replace hard-coded meals as the center of Food with a robust tracker for what was actually eaten.
+
+- Individual foods, drinks, snacks, and meal entries
+- Serving quantities and partial servings
+- Daily calorie target, logged calories, and calories remaining
+- Protein and fiber targets
+- Recent foods, favorites, and one-tap repeats
+- Manual nutrition-label entry
+- Online packaged-food search
+- Reusable meals and meal-plan templates
+- Repeat yesterday or a previous meal
+- Planned versus actual intake
+- Clear nutrition-source labels: exact label, database estimate, personal estimate, or planned value
+- Exercise calories shown separately and not automatically eaten back by default
+
 **Status: next.**
-
-Make Today the main operating screen with time-aware morning, afternoon, and evening guidance. Most normal days should be completed without leaving Today.
-
-## 1.4 — Food Depth
-
-Strengthen today’s food logging, meal plans, serving sizes, recent foods, favorites, partial meals, swaps, and nutrition-source labels.
 
 ## 1.5 — Movement Depth
 
-Combine today’s workout, exercise guidance, plan progression, quiet alternatives, recovery logic, and explainable recommendations.
+Combine today’s workout, exercise guidance, plan progression, quiet alternatives, recovery logic, custom workout editing, and explainable recommendations.
 
 ## 1.6 — Progress and Review Depth
 
@@ -72,7 +64,7 @@ Strengthen trend views, historical detail, daily and weekly reviews, confidence 
 
 ## 1.7 — Personalization Without Clutter
 
-Add schedule, priority, tone, display, and card-order preferences without adding primary navigation.
+Add schedule, priority, tone, display, and optional card-order preferences without adding primary navigation.
 
 ## 1.8 — Accessibility and PWA Hardening
 
@@ -88,32 +80,9 @@ Pathfinder 2.0 should answer four questions:
 
 ```text
 Today: What matters now?
-Food: What have I eaten, and what is next?
+Food: What have I eaten, and what comes next?
 Movement: What should I do today?
 Progress: What direction am I moving?
 ```
 
-Core requirements:
-
-- Four-section navigation
-- Today-first operation
-- Immutable historical meaning
-- Durable local database
-- Reliable backup and recovery
-- Fast logging
-- Explainable recommendations
-- Strong offline behavior
-- Accessible interaction
-- Automated regression coverage
-- Clear privacy boundaries
-- No account requirement
-
-## Deliberately excluded before 2.0
-
-- Additional primary tabs
-- Social feeds
-- Public profiles
-- Competitive leaderboards
-- Account requirement
-- Medical diagnosis
-- Integrations before the data foundation is ready
+Core requirements include Today-first operation, historically accurate records, durable local storage, reliable recovery, fast logging, explainable recommendations, strong offline behavior, accessibility, automated regression coverage, clear privacy boundaries, and no account requirement.

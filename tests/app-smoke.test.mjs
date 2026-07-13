@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeIndexedDb, installFakeLocalStorage } from './fake-indexeddb.mjs';
 
-test('Pathfinder 1.2.1 starts, renders Today, and opens nested sections with foundation diagnostics', async () => {
+test('Pathfinder 1.3 starts, renders the Today-first flow, and opens nested sections with foundation diagnostics', async () => {
   installFakeIndexedDb();
   installFakeLocalStorage();
   const sessionValues = new Map();
@@ -51,7 +51,7 @@ test('Pathfinder 1.2.1 starts, renders Today, and opens nested sections with fou
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.2.1 Calm Navigation', coreAppVersion: '1.2.1', serviceWorkerCache: 'pathfinder-1.2.1' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.3 Today-First Daily Flow', coreAppVersion: '1.3', serviceWorkerCache: 'pathfinder-1.3' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -63,7 +63,12 @@ test('Pathfinder 1.2.1 starts, renders Today, and opens nested sections with fou
   await import(`../app.js?smoke=${Date.now()}`);
   await new Promise(resolve => setTimeout(resolve, 160));
 
-  assert.match(elements.get('app').innerHTML, /Today needs/);
+  assert.match(elements.get('app').innerHTML, /Daily food budget/);
+  assert.match(elements.get('app').innerHTML, /calories remaining/);
+  assert.match(elements.get('app').innerHTML, /What matters now/);
+  assert.match(elements.get('app').innerHTML, /id="today-food-card"/);
+  assert.match(elements.get('app').innerHTML, /id="today-movement-card"/);
+  assert.match(elements.get('app').innerHTML, /id="today-routine-card"/);
   assert.match(elements.get('app').innerHTML, /Inside Today/);
   assert.match(elements.get('app').innerHTML, /Routines/);
   assert.equal(typeof listeners.click, 'function');
@@ -89,6 +94,7 @@ test('Pathfinder 1.2.1 starts, renders Today, and opens nested sections with fou
     }
   });
 
+  assert.match(elements.get('app').innerHTML, /Pathfinder 1\.3 Today-First Daily Flow/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.2\.1 Calm Navigation/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.1 Durable Data Foundation/);
   assert.match(elements.get('app').innerHTML, /IndexedDB foundation/);

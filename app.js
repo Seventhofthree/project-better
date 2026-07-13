@@ -1,7 +1,7 @@
-/* Pathfinder 1.2.1
-   Calm Navigation hierarchy polish built on the passed 1.1 durable data foundation.
-   Eleven feature tabs are consolidated into five primary destinations while
-   preserving every existing view as a nested destination.
+/* Pathfinder 1.3
+   Today-First Daily Flow built on the passed 1.2.1 calm navigation release.
+   Today now prioritizes the current part of the day, keeps daily actions close,
+   and introduces a prominent calories-remaining bridge for the 1.4 food tracker.
 */
 
 import {
@@ -49,7 +49,14 @@ import {
   sectionForView
 } from './navigation.js';
 
-const APP_VERSION = '1.2.1';
+import {
+  calorieBudgetSummary,
+  currentMealForPhase,
+  todayPhaseDefinition,
+  todayPhaseForHour
+} from './today-flow.js';
+
+const APP_VERSION = '1.3';
 const APP_DATA_SCHEMA_VERSION = 2;
 const STORAGE_KEY = 'pathfinder.state.v8';
 const STORAGE_BACKUP_KEY = 'pathfinder.state.v8.backup';
@@ -775,7 +782,9 @@ function releaseReadinessCardHtml() {
   const saveReady = !storageLastError;
   const primaryReady = Boolean(primary.exists);
   const backupReady = Boolean(backup.exists && Number(backup.days || 0) > 0);
-  const overallReady = activeTabOk && dateOk && saveReady && primaryReady && backupReady;
+  const releaseVersion = window.__PATHFINDER_RELEASE__?.coreAppVersion || APP_VERSION;
+  const versionReady = releaseVersion === APP_VERSION;
+  const overallReady = versionReady && activeTabOk && dateOk && saveReady && primaryReady && backupReady;
   return `<div class="card">
     <div class="card-title">
       <div>
@@ -785,7 +794,7 @@ function releaseReadinessCardHtml() {
       <span class="badge ${overallReady ? 'blue' : 'warn'}">${overallReady ? 'Looks ready' : 'Check notes'}</span>
     </div>
     <ul class="check-list mini-list">
-      <li><span>${APP_VERSION === '1.2.1' ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)} · data schema ${APP_DATA_SCHEMA_VERSION}</span></li>
+      <li><span>${versionReady ? '✓' : '○'}</span><span>Core app version: ${escapeHtml(APP_VERSION)} · release metadata ${escapeHtml(releaseVersion)} · data schema ${APP_DATA_SCHEMA_VERSION}</span></li>
       <li><span>${activeTabOk ? '✓' : '○'}</span><span>Active tab is valid: ${escapeHtml(appState.activeTab || 'missing')}</span></li>
       <li><span>${dateOk ? '✓' : '○'}</span><span>Selected date is valid: ${escapeHtml(appState.selectedDate || 'missing')}</span></li>
       <li><span>${saveReady ? '✓' : '○'}</span><span>Storage warning: ${escapeHtml(storageLastError || 'none')}</span></li>
@@ -896,19 +905,14 @@ function render() {
 }
 
 function guidanceButtonHtml(guidance) {
-  if (guidance.tab === 'today' && guidance.button === 'Do quick check-in') {
-    return `<button class="primary" data-action="focus-checkin">${escapeHtml(guidance.button)}</button>`;
+  if (guidance.cardId) {
+    return `<button class="primary" data-action="focus-today-card" data-card-id="${escapeHtml(guidance.cardId)}" data-focus-message="${escapeHtml(guidance.focusMessage || guidance.button)}">${escapeHtml(guidance.button)}</button>`;
   }
-  return `<button class="primary" data-action="jump" data-tab-target="${escapeHtml(guidance.tab)}">${escapeHtml(guidance.button)}</button>`;
+  return `<button class="primary" data-action="jump" data-tab-target="${escapeHtml(guidance.tab || 'today')}">${escapeHtml(guidance.button)}</button>`;
 }
 
-
 function currentTimeBlock() {
-  if (appState.selectedDate !== todayKey()) return 'review';
-  const hour = new Date().getHours();
-  if (hour < 11) return 'morning';
-  if (hour < 17) return 'betweenLunchDinner';
-  return 'evening';
+  return todayPhaseForHour(new Date().getHours(), appState.selectedDate === todayKey());
 }
 
 function routineFocusInfo(day) {
@@ -1256,131 +1260,227 @@ async function copyCompanionPacket() {
   await copyTextWithFallback(text, 'Companion packet copied', 'Pathfinder companion packet');
 }
 
+function foodLogEntryCount(day) {
+  return mealLogCount(day) + Number(day.meals?.customItems?.length || 0);
+}
+
+function todayBudgetCardHtml(day, totals) {
+  const budget = calorieBudgetSummary({
+    goal: appState.data.settings.calorieGoal || totals.plannedCalories,
+    logged: totals.loggedCalories,
+    loggedEntries: foodLogEntryCount(day)
+  });
+  const cardClass = budget.status === 'over' ? 'warning' : 'highlight';
+  const badgeClass = budget.status === 'over' || budget.status === 'near' ? 'warn' : budget.status === 'empty' ? 'neutral' : '';
+  return `<div class="card ${cardClass} today-budget-card" aria-label="Daily calorie budget">
+    <div class="card-title">
+      <div>
+        <p class="eyebrow">Daily food budget</p>
+        <span class="today-budget-value">${escapeHtml(budget.value)}</span>
+        <h3>${escapeHtml(budget.label)}</h3>
+      </div>
+      <span class="badge ${badgeClass}">${Math.round(budget.consumed).toLocaleString()} / ${Math.round(budget.target).toLocaleString()}</span>
+    </div>
+    <div class="budget-progress" role="progressbar" aria-label="Calories logged" aria-valuemin="0" aria-valuemax="${Math.round(budget.target)}" aria-valuenow="${Math.round(Math.min(budget.consumed, budget.target))}"><span style="width:${budget.progressPercent.toFixed(1)}%"></span></div>
+    <p class="note">${escapeHtml(budget.note)}</p>
+    <div class="toggle-row tight">
+      <button class="primary small" data-action="focus-today-card" data-card-id="today-food-card" data-focus-message="Food logger opened">Log from Today</button>
+      <button class="ghost small" data-action="jump" data-tab-target="meals">Open full Food</button>
+    </div>
+  </div>`;
+}
+
+function todayMealTarget(day, phase) {
+  const phaseMeal = currentMealForPhase(phase);
+  if (phaseMeal && !mealLogged(day, phaseMeal)) return phaseMeal;
+  return MEAL_KEYS.find(key => !mealLogged(day, key)) || phaseMeal || 'dinner';
+}
+
+function todayMealQuickCardHtml(day, totals, phase) {
+  const key = todayMealTarget(day, phase);
+  const meal = mealForDayDisplay(day, key);
+  const status = statusForMeal(day, key);
+  const allDone = mealLogComplete(day);
+  const swappedNeedsCalories = status === 'swapped'
+    && !selectedSwapForMeal(day, key)
+    && !(day.meals?.customItems || []).some(item => item.meal === key);
+  return `<div class="card today-action-card ${allDone ? 'today-action-done' : ''} ${swappedNeedsCalories ? 'warning' : ''}" id="today-food-card">
+    <div class="card-title">
+      <div>
+        <p class="eyebrow">Food now</p>
+        <h3>${allDone ? 'Meals are closed' : `${capitalize(key)} · ${escapeHtml(meal.shortLabel || meal.label)}`}</h3>
+        <p>${allDone ? 'All three meal slots have a status.' : `${Math.round(meal.calories || 0)} planned kcal · log what actually happened.`}</p>
+      </div>
+      <span class="badge ${status === 'skipped' ? 'warn' : status ? '' : 'neutral'}">${escapeHtml(allDone ? 'complete' : mealStatusLabels[status])}</span>
+    </div>
+    ${allDone ? '' : `<div class="segmented today-quick-status" role="group" aria-label="${escapeHtml(key)} status">
+      ${['planned', 'swapped', 'skipped'].map(value => `<button data-action="meal-status" data-meal="${key}" data-status="${value}" class="${status === value ? 'active' : ''}">${escapeHtml(mealStatusLabels[value])}</button>`).join('')}
+    </div>`}
+    <div class="today-meal-strip">
+      ${MEAL_KEYS.map(mealKey => {
+        const mealStatus = statusForMeal(day, mealKey);
+        return `<button class="today-meal-chip ${mealStatus ? 'done' : ''}" data-action="meal-status" data-meal="${mealKey}" data-status="${mealStatus ? '' : 'planned'}" title="${mealStatus ? 'Clear status' : 'Mark Ate plan'}"><span>${mealStatus ? '✓' : '○'}</span>${capitalize(mealKey)}<small>${escapeHtml(mealStatusLabels[mealStatus])}</small></button>`;
+      }).join('')}
+    </div>
+    <div class="grid two today-mini-metrics">
+      <div class="metric mini"><span class="value">${Math.round(totals.loggedCalories).toLocaleString()}</span><span class="label">logged calories</span></div>
+      <div class="metric mini"><span class="value">${Math.round(totals.loggedProtein)}g</span><span class="label">logged protein</span></div>
+    </div>
+    ${swappedNeedsCalories ? `<div class="callout warning"><strong>Calories still needed</strong><p>Swapped is recorded, but no saved replacement or extra food is attached to ${escapeHtml(key)} yet. Open full Food to log what you ate.</p></div>` : ''}
+    <p class="note">The full individual-food calorie tracker arrives in 1.4. This card uses the current meal statuses, snapshots, and extra food logs.</p>
+  </div>`;
+}
+
+function todayMovementCardHtml(day, workout) {
+  const done = ['full','minimum','recovery'].includes(day.exercise.status);
+  const suggestion = exerciseSuggestion(day);
+  return `<div class="card today-action-card ${done ? 'today-action-done' : ''}" id="today-movement-card">
+    <div class="card-title">
+      <div>
+        <p class="eyebrow">Movement now</p>
+        <h3>${escapeHtml(workout.title)}</h3>
+        <p>${escapeHtml(done ? movementNextStep(day) : suggestion.message)}</p>
+      </div>
+      <span class="badge ${done ? workoutBadge(day) : suggestion.badge || 'neutral'}">${escapeHtml(exerciseStatusLabels[day.exercise.status] || suggestion.label)}</span>
+    </div>
+    <ul class="check-list mini-list">
+      ${workoutSuggestionSteps(day, workout).slice(0, 3).map(item => `<li><span>✓</span><span>${escapeHtml(item)}</span></li>`).join('')}
+    </ul>
+    <div class="toggle-row tight">
+      <button class="primary small" data-action="log-exercise-status" data-status="full">Full</button>
+      <button class="secondary small" data-action="log-exercise-status" data-status="minimum">Minimum</button>
+      <button class="ghost small" data-action="log-exercise-status" data-status="recovery">Recovery</button>
+      <button class="ghost small" data-action="jump" data-tab-target="exercise">Details</button>
+    </div>
+  </div>`;
+}
+
+function todayRoutineCardHtml(day) {
+  const focus = routineFocusInfo(day);
+  const complete = routineBlockIsComplete(day, focus.block);
+  return `<div class="card today-action-card ${complete ? 'today-action-done' : ''}" id="today-routine-card">
+    <div class="card-title">
+      <div>
+        <p class="eyebrow">Routine now</p>
+        <h3>${escapeHtml(focus.title)}</h3>
+        <p>${escapeHtml(focus.message)}</p>
+      </div>
+      <span class="badge ${complete ? '' : 'neutral'}">${routineCompletion(day)}%</span>
+    </div>
+    ${routinePreviewHtml(day, true)}
+    <div class="toggle-row tight"><button class="ghost small" data-action="jump" data-tab-target="routines">Full routine board</button></div>
+  </div>`;
+}
+
+function todayCheckinCardHtml(day, phase) {
+  const hasData = checkinHasData(day);
+  const shouldOpen = !hasData || phase === 'morning';
+  return `<details class="today-fold" ${shouldOpen ? 'open' : ''}>
+    <summary><span>Quick check-in</span><small>${hasData ? 'recorded · tap to edit' : 'sleep, energy, stress, and hunger'}</small></summary>
+    <div class="card flat" id="quick-checkin-card">
+      <div class="card-title"><div><h3>How is the day actually going?</h3><p>Fast enough for a tired workday.</p></div><span class="badge neutral">${Number(day.checkin.water || 0)} / ${Number(appState.data.settings.waterGoal || 8)} water</span></div>
+      <div class="input-row">
+        ${selectGroup('energy', 'Energy', day.checkin.energy, ['', 'Low', 'Okay', 'Good', 'Great'])}
+        ${selectGroup('mood', 'Mood', day.checkin.mood, ['', 'Rough', 'Steady', 'Good', 'Proud'])}
+        ${selectGroup('sleep', 'Sleep', day.checkin.sleep, ['', 'Poor', 'Okay', 'Good'])}
+        ${selectGroup('stress', 'Stress', day.checkin.stress, ['', 'Low', 'Medium', 'High'])}
+        ${selectGroup('hunger', 'Hunger', day.checkin.hunger, ['', 'Low', 'Normal', 'High'])}
+        <div class="input-group"><label for="today-weight">Weight</label><input id="today-weight" data-field="weight" type="number" min="0" step="0.1" value="${escapeHtml(day.weight || '')}" /></div>
+      </div>
+      <div class="toggle-row tight"><button class="ghost small" data-action="water" data-delta="-1">− water</button><span class="badge neutral">${Number(day.checkin.water || 0)} cups</span><button class="ghost small" data-action="water" data-delta="1">+ water</button></div>
+      <div class="input-group" style="margin-top:12px;"><label for="daily-note">One-line note</label><input id="daily-note" data-field="dailyNote" type="text" placeholder="What affected today?" value="${escapeHtml(day.dailyNote || '')}" /></div>
+    </div>
+  </details>`;
+}
+
+function todayWindDownCardHtml(day, phase) {
+  const shouldOpen = phase === 'evening' || phase === 'review' || Boolean(day.windDown.completed || day.windDown.note);
+  return `<details class="today-fold" ${shouldOpen ? 'open' : ''} id="today-winddown-card">
+    <summary><span>Wind-down</span><small>${day.windDown.completed ? 'done' : phase === 'evening' ? 'one sentence is enough' : 'saved for tonight'}</small></summary>
+    <div class="card flat">
+      <h3>Close the day</h3>
+      <p>${escapeHtml(promptForDate(appState.selectedDate))}</p>
+      <textarea data-field="windDown.note" placeholder="A short note is enough.">${escapeHtml(day.windDown.note || '')}</textarea>
+      <div class="input-row two" style="margin-top:10px;">
+        <div class="input-group"><label>Calm minutes</label><input data-field="windDown.calmMinutes" type="number" min="0" value="${escapeHtml(day.windDown.calmMinutes || '')}" /></div>
+        <div class="input-group"><label>Status</label><button class="${day.windDown.completed ? 'primary' : 'secondary'}" data-action="toggle" data-path="windDown.completed">${day.windDown.completed ? 'Done' : 'Mark done'}</button></div>
+      </div>
+      ${phase === 'evening' || phase === 'review' ? `<div class="assistant-output" style="margin-top:12px;">${escapeHtml(eveningRecap(day))}</div>` : ''}
+    </div>
+  </details>`;
+}
+
+function todayOverviewDetailsHtml(day, totals, score, phase) {
+  const open = phase === 'review';
+  return `<details class="today-fold today-overview" id="today-overview" ${open ? 'open' : ''}>
+    <summary><span>Day overview</span><small>${score}% score · ${dataQuality(day)}% data quality</small></summary>
+    <div class="card flat">
+      <div class="grid four">
+        <div class="metric"><span class="value">${score}%</span><span class="label">daily score</span></div>
+        <div class="metric"><span class="value">${Math.round(totals.loggedCalories).toLocaleString()}</span><span class="label">logged calories</span></div>
+        <div class="metric"><span class="value">${routineCompletion(day)}%</span><span class="label">routine</span></div>
+        <div class="metric"><span class="value">${dataQuality(day)}%</span><span class="label">data quality</span></div>
+      </div>
+      <section class="progress-row" aria-label="Daily progress" style="margin-top:14px;">
+        ${stepCard('Breakfast', mealForDayDisplay(day, 'breakfast').shortLabel, mealLogged(day, 'breakfast'), mealStatusLabels[statusForMeal(day, 'breakfast')])}
+        ${stepCard('Lunch', mealForDayDisplay(day, 'lunch').shortLabel, mealLogged(day, 'lunch'), mealStatusLabels[statusForMeal(day, 'lunch')])}
+        ${stepCard('Dinner', mealForDayDisplay(day, 'dinner').shortLabel, mealLogged(day, 'dinner'), mealStatusLabels[statusForMeal(day, 'dinner')])}
+        ${stepCard('Movement', appState.data.settings.exerciseWindow, ['full','minimum','recovery'].includes(day.exercise.status), exerciseStatusLabels[day.exercise.status] || 'Open', day.exercise.status === 'recovery')}
+        ${stepCard('Routine', routineLabelForDay(day), routineCompletion(day) >= 60, `${routineCompletion(day)}% done`)}
+        ${stepCard('Wind-down', 'Calm review', day.windDown.completed, day.windDown.completed ? 'Done' : 'Open')}
+      </section>
+    </div>
+  </details>`;
+}
+
 function renderToday() {
   setTitle('Today');
   const day = getDay();
   const totals = totalsForDay(day);
   const score = completionScore(day);
-  const stats = weeklyStats(appState.selectedDate);
   const guidance = dailyGuidance(day);
   const workout = recommendedWorkout(day);
-  const mode = selectedRoutineMode();
+  const phase = currentTimeBlock();
+  const phaseInfo = todayPhaseDefinition(phase);
   ensureWeatherForToday();
-  const routineFocus = routineFocusInfo(day);
 
   $('#app').innerHTML = `
-    <section class="hero">
-      <div class="card highlight">
-        <p class="eyebrow">${formatDate(appState.selectedDate)}</p>
-        <h2>${greeting()}, ${escapeHtml(appState.data.settings.name || 'friend')}.</h2>
-        <p>${escapeHtml(guidance.message)}</p>
-        <div class="hero-actions">
-          ${guidanceButtonHtml(guidance)}
-          <button class="secondary" data-action="log-exercise-status" data-status="minimum">Minimum win</button>
-          <button class="ghost" data-action="jump" data-tab-target="assistant">Open brief</button>
+    <section class="hero today-hero">
+      <div class="card highlight today-focus-card">
+        <div class="card-title">
+          <div>
+            <p class="eyebrow">${escapeHtml(phaseInfo.label)} · ${formatDate(appState.selectedDate)}</p>
+            <h2>${escapeHtml(phaseInfo.greeting)}${phase === 'review' ? ` ${formatDate(appState.selectedDate)}` : `, ${escapeHtml(appState.data.settings.name || 'friend')}.`}</h2>
+          </div>
+          <span class="badge ${guidance.badgeClass}">${escapeHtml(guidance.priority)}</span>
         </div>
+        <p class="today-focus-message">${escapeHtml(guidance.message)}</p>
+        <p class="note">${escapeHtml(guidance.reason)}</p>
+        <div class="hero-actions">${guidanceButtonHtml(guidance)}<button class="ghost" data-action="jump" data-tab-target="assistant">Open full brief</button></div>
       </div>
-      <div class="card">
-        <div class="score-circle" style="--score:${score}"><div><span>${score}</span><small>daily score</small></div></div>
-        <p class="note"><strong>Goal:</strong> log food honestly, learn the movements, and use the projection as a direction check instead of a promise.</p>
-      </div>
+      ${todayBudgetCardHtml(day, totals)}
     </section>
 
-    ${companionTodayCardHtml(day, stats)}
+    <section class="today-phase-banner"><span class="badge blue">${escapeHtml(phaseInfo.label)}</span><strong>What matters now</strong><p>${escapeHtml(phaseInfo.summary)}</p></section>
 
-    <section class="progress-row" aria-label="Daily routine progress">
-      ${stepCard('Breakfast', mealForDayDisplay(day, 'breakfast').shortLabel, mealLogged(day, 'breakfast'), mealStatusLabels[statusForMeal(day, 'breakfast')])}
-      ${stepCard('Lunch', mealForDayDisplay(day, 'lunch').shortLabel, mealLogged(day, 'lunch'), mealStatusLabels[statusForMeal(day, 'lunch')])}
-      ${stepCard('Dinner', mealForDayDisplay(day, 'dinner').shortLabel, mealLogged(day, 'dinner'), mealStatusLabels[statusForMeal(day, 'dinner')])}
-      ${stepCard('Movement', appState.data.settings.exerciseWindow, ['full','minimum','recovery'].includes(day.exercise.status), exerciseStatusLabels[day.exercise.status] || 'Open', day.exercise.status === 'recovery')}
-      ${stepCard('Routine', `${routineLabelForDay(day)} · ${routineCompletion(day)}%`, routineCompletion(day) >= 60, routineCompletion(day) ? `${routineCompletion(day)}% done` : 'Open')}
-      ${stepCard('Wind-down', 'Calm review before bed', day.windDown.completed, day.windDown.completed ? 'Done' : 'Open')}
+    <section class="grid three today-action-grid">
+      ${todayMealQuickCardHtml(day, totals, phase)}
+      ${todayMovementCardHtml(day, workout)}
+      ${todayRoutineCardHtml(day)}
     </section>
 
-    <section class="grid sidebar" style="margin-top:16px;">
+    <section class="grid two today-support-grid" style="margin-top:16px;">
       <div class="grid">
-        <div class="card">
-          <div class="card-title">
-            <div>
-              <h3>Today needs</h3>
-              <p>${escapeHtml(guidance.reason)}</p>
-            </div>
-            <span class="badge ${guidance.badgeClass}">${escapeHtml(guidance.priority)}</span>
-          </div>
-          <div class="grid three">
-            <div class="metric"><span class="value">${Math.round(totals.loggedCalories).toLocaleString()}</span><span class="label">logged calories</span><small>${appState.data.settings.calorieGoal.toLocaleString()} goal</small></div>
-            <div class="metric"><span class="value">${Math.round(totals.loggedProtein)}g</span><span class="label">logged protein</span><small>${Math.round(totals.plannedProtein)}g planned</small></div>
-            <div class="metric"><span class="value">${dataQuality(day)}%</span><span class="label">data quality</span><small>more honest beats perfect</small></div>
-          </div>
-        </div>
-
-        <div class="card workout-card">
-          <div class="card-title">
-            <div>
-              <h3>Recommended movement</h3>
-              <p>${escapeHtml(workout.title)} · ${escapeHtml(workout.bestFor)}</p>
-            </div>
-            <span class="badge ${workoutBadge(day)}">${exerciseStatusLabels[day.exercise.status] || 'Open'}</span>
-          </div>
-          <ul class="check-list">
-            ${workoutSuggestionSteps(day, workout).map(item => `<li><span>✓</span><span>${escapeHtml(item)}</span></li>`).join('')}
-          </ul>
-          <div class="toggle-row">
-            <button class="primary" data-action="log-exercise-status" data-status="full">Full win</button>
-            <button class="secondary" data-action="log-exercise-status" data-status="minimum">Minimum win</button>
-            <button class="ghost" data-action="log-exercise-status" data-status="recovery">Recovery</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">
-            <div>
-              <h3>${escapeHtml(routineFocus.title)}</h3>
-              <p>${escapeHtml(routineFocus.message)}</p>
-            </div>
-            <span class="badge neutral">${routineCompletion(day)}%</span>
-          </div>
-          ${routinePreviewHtml(day, true)}
-          <div class="toggle-row"><button class="ghost" data-action="jump" data-tab-target="routines">Open full routine board</button></div>
-        </div>
+        ${todayCheckinCardHtml(day, phase)}
+        ${todayWindDownCardHtml(day, phase)}
       </div>
-
-      <aside class="grid">
-        ${weatherCardHtml()}
-        <div class="card" id="quick-checkin-card">
-          <div class="card-title">
-            <div>
-              <h3>Quick check-in</h3>
-              <p>Fast enough for tired workdays.</p>
-            </div>
-            <span class="badge neutral">${Number(day.checkin.water || 0)} / ${Number(appState.data.settings.waterGoal || 8)} water</span>
-          </div>
-          <div class="input-row">
-            ${selectGroup('energy', 'Energy', day.checkin.energy, ['', 'Low', 'Okay', 'Good', 'Great'])}
-            ${selectGroup('mood', 'Mood', day.checkin.mood, ['', 'Rough', 'Steady', 'Good', 'Proud'])}
-            ${selectGroup('sleep', 'Sleep', day.checkin.sleep, ['', 'Poor', 'Okay', 'Good'])}
-            ${selectGroup('stress', 'Stress', day.checkin.stress, ['', 'Low', 'Medium', 'High'])}
-            ${selectGroup('hunger', 'Hunger', day.checkin.hunger, ['', 'Low', 'Normal', 'High'])}
-            <div class="input-group"><label for="today-weight">Weight</label><input id="today-weight" data-field="weight" type="number" min="0" step="0.1" value="${escapeHtml(day.weight || '')}" /></div>
-          </div>
-          <div class="toggle-row">
-            <button class="ghost small" data-action="water" data-delta="-1">− water</button>
-            <span class="badge neutral">${Number(day.checkin.water || 0)} cups</span>
-            <button class="ghost small" data-action="water" data-delta="1">+ water</button>
-          </div>
-          <div class="input-group" style="margin-top:12px;"><label for="daily-note">One-line note</label><input id="daily-note" data-field="dailyNote" type="text" placeholder="What affected today?" value="${escapeHtml(day.dailyNote || '')}" /></div>
-        </div>
-
-        <div class="card">
-          <h3>Wind-down</h3>
-          <p>${escapeHtml(promptForDate(appState.selectedDate))}</p>
-          <textarea data-field="windDown.note" placeholder="A short note is enough.">${escapeHtml(day.windDown.note || '')}</textarea>
-          <div class="input-row two" style="margin-top:10px;">
-            <div class="input-group"><label>Calm minutes</label><input data-field="windDown.calmMinutes" type="number" min="0" value="${escapeHtml(day.windDown.calmMinutes || '')}" /></div>
-            <div class="input-group"><label>Status</label><button class="${day.windDown.completed ? 'primary' : 'secondary'}" data-action="toggle" data-path="windDown.completed">${day.windDown.completed ? 'Done' : 'Mark done'}</button></div>
-          </div>
-        </div>
-      </aside>
+      <div class="grid">
+        <details class="today-fold" ${phase === 'morning' || phase === 'betweenLunchDinner' ? 'open' : ''}>
+          <summary><span>Weather window</span><small>${phase === 'evening' ? 'available if needed' : 'movement and hydration context'}</small></summary>
+          ${weatherCardHtml()}
+        </details>
+        ${todayOverviewDetailsHtml(day, totals, score, phase)}
+      </div>
     </section>`;
 }
 
@@ -2748,6 +2848,38 @@ function injectMobilePwaStyles() {
     .tabs.primary-tabs { width: max-content; max-width: 100%; }
     .toggle-row.tight { gap: 8px; }
     .companion-card { scroll-margin-top: 90px; }
+    .today-hero { align-items: stretch; }
+    .today-hero > .card { min-height: 100%; }
+    .today-focus-card { display: flex; flex-direction: column; justify-content: center; }
+    .today-focus-message { color: var(--soft); font-size: clamp(1.05rem, 2vw, 1.28rem); margin: 8px 0; }
+    .today-budget-card { display: grid; align-content: center; }
+    .today-budget-value { display: block; color: var(--text); font-size: clamp(3rem, 7vw, 5.4rem); font-weight: 950; line-height: .86; letter-spacing: -.075em; margin: 8px 0 10px; }
+    .budget-progress { height: 10px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid var(--line); }
+    .budget-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+    .today-budget-card.warning .budget-progress span { background: var(--warning); }
+    .today-phase-banner { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 10px; margin: 0 0 16px; padding: 11px 14px; border: 1px solid rgba(164,215,255,.22); border-radius: 16px; background: rgba(164,215,255,.07); }
+    .today-phase-banner p { margin: 0; }
+    .today-action-grid { align-items: stretch; }
+    .today-action-card { display: flex; flex-direction: column; min-height: 100%; }
+    .today-action-card .toggle-row:last-child { margin-top: auto; }
+    .today-action-done { border-color: rgba(123,207,158,.3); background: linear-gradient(180deg, rgba(123,207,158,.09), rgba(255,255,255,.035)); }
+    .today-quick-status { margin-top: 4px; }
+    .today-meal-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 12px 0; }
+    .today-meal-chip { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 3px 7px; text-align: left; border: 1px solid var(--line); border-radius: 13px; padding: 9px; color: var(--text); background: rgba(255,255,255,.045); }
+    .today-meal-chip span { grid-row: 1 / span 2; color: var(--muted); }
+    .today-meal-chip small { overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+    .today-meal-chip.done { border-color: rgba(123,207,158,.35); background: rgba(123,207,158,.1); }
+    .today-meal-chip.done span { color: var(--accent); }
+    .today-mini-metrics { margin-top: 4px; }
+    .today-fold { border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.025); overflow: hidden; }
+    .today-fold > summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 12px; align-items: center; min-height: var(--tap-target); padding: 13px 15px; color: var(--soft); font-weight: 850; }
+    .today-fold > summary::-webkit-details-marker { display: none; }
+    .today-fold > summary:after { content: '›'; color: var(--muted); font-size: 1.35rem; transition: transform .15s ease; }
+    .today-fold[open] > summary:after { transform: rotate(90deg); }
+    .today-fold > summary small { margin-left: auto; color: var(--muted); font-weight: 500; text-align: right; }
+    .today-fold > .card { border: 0; border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+    .today-overview { scroll-margin-top: 80px; }
+    #today-food-card, #today-movement-card, #today-routine-card, #quick-checkin-card, #today-winddown-card { scroll-margin-top: 80px; }
     body.compact-mode .card { padding: 14px; }
     body.compact-mode .grid { gap: 12px; }
     body.compact-mode .metric { padding: 12px; }
@@ -2771,6 +2903,12 @@ function injectMobilePwaStyles() {
       .toggle-row { align-items: stretch; }
       .toggle-row button { flex: 1 1 auto; }
       .metric .value { font-size: clamp(1.2rem, 7vw, 2rem); }
+      .today-budget-value { font-size: clamp(3.2rem, 17vw, 5rem); }
+      .today-phase-banner { grid-template-columns: auto minmax(0, 1fr); }
+      .today-phase-banner p { grid-column: 1 / -1; }
+      .today-action-grid { gap: 12px; }
+      .today-fold > summary { align-items: flex-start; }
+      .today-fold > summary small { max-width: 58%; }
       .assistant-output, .review-output { white-space: pre-wrap; overflow-wrap: anywhere; }
       canvas { width: 100% !important; height: auto !important; }
     }
@@ -2817,6 +2955,33 @@ function updateReadyCardHtml() {
     <h3>Update habit</h3>
     <p>After an update, open the versioned link, confirm this screen shows the new version, then run the save test before using the app normally.</p>
     <p class="note">Current release: ${escapeHtml(window.__PATHFINDER_RELEASE__?.release || APP_VERSION)} · cache ${escapeHtml(window.__PATHFINDER_RELEASE__?.serviceWorkerCache || 'unknown')}</p>
+  </div>`;
+}
+
+function todayFirstReleaseCardHtml() {
+  const day = readDay(appState.selectedDate);
+  const totals = totalsForDay(day);
+  const budget = calorieBudgetSummary({ goal: appState.data.settings.calorieGoal || totals.plannedCalories, logged: totals.loggedCalories, loggedEntries: foodLogEntryCount(day) });
+  return `<div class="card highlight">
+    <div class="card-title">
+      <div>
+        <h3>Pathfinder 1.3 Today-First Daily Flow</h3>
+        <p>Today now centers the current part of the day and keeps the most common actions on one screen.</p>
+      </div>
+      <span class="badge blue">Current release</span>
+    </div>
+    <div class="grid three">
+      <div class="metric"><span class="value">${escapeHtml(todayPhaseDefinition(currentTimeBlock()).label)}</span><span class="label">current Today phase</span><small>morning · afternoon · evening</small></div>
+      <div class="metric"><span class="value">${escapeHtml(budget.value)}</span><span class="label">${escapeHtml(budget.label)}</span><small>bridge to 1.4 calorie tracking</small></div>
+      <div class="metric"><span class="value">1</span><span class="label">main operating screen</span><small>food, movement, routine, check-in</small></div>
+    </div>
+    <ul class="check-list mini-list" style="margin-top:14px;">
+      <li><span>✓</span><span>Morning, afternoon, evening, and saved-day review modes prioritize different information.</span></li>
+      <li><span>✓</span><span>Meal status, movement, routine items, check-in, and wind-down can be handled from Today.</span></li>
+      <li><span>✓</span><span>Completed and later-day details collapse so the current task stays visible.</span></li>
+      <li><span>✓</span><span>Calories remaining stays prominent and leads directly into the 1.4 robust calorie tracker.</span></li>
+    </ul>
+    <p class="note">No storage schema changed. The 1.1 durable foundation and 1.2.1 navigation hierarchy remain intact.</p>
   </div>`;
 }
 
@@ -2892,6 +3057,7 @@ function renderSettings() {
         ${mobileTipsCardHtml()}
         ${updateReadyCardHtml()}
         ${releaseReadinessCardHtml()}
+        ${todayFirstReleaseCardHtml()}
         ${calmNavigationReleaseCardHtml()}
         ${maintenanceReleaseCardHtml()}
         ${storageDebugCardHtml()}
@@ -3067,17 +3233,49 @@ function workoutBadge(day) {
   return 'neutral';
 }
 
+function routineBlockIsComplete(day, block) {
+  const items = routineBlockItemsForDay(day, block);
+  return !items.length || items.every(item => day.routine.completedIds[item.id]);
+}
+
 function dailyGuidance(day) {
   const stats = weeklyStats(appState.selectedDate);
-  if (day.exercise.pain === 'Yes') return { priority: 'Protect body', badgeClass: 'danger', tab: 'exercise', button: 'Open recovery plan', message: 'Pain is logged. Pathfinder wants recovery, not hero mode.', reason: 'The app should keep you consistent without encouraging you to push through pain.' };
-  if (!checkinHasData(day)) return { priority: 'Check-in first', badgeClass: 'blue', tab: 'today', button: 'Do quick check-in', message: 'Start with a quick check-in so today’s plan can fit your real energy.', reason: 'Without sleep, energy, stress, and hunger, Pathfinder can only guess.' };
-  if (day.checkin.sleep === 'Poor' || day.checkin.energy === 'Low') return { priority: 'Shrink the plan', badgeClass: 'warn', tab: 'exercise', button: 'Use minimum workout', message: 'Today looks like a minimum-win day. Keep the chain alive without draining the night.', reason: 'Low sleep or low energy is exactly when the smaller version protects long-term consistency.' };
-  if (!mealLogged(day, 'breakfast')) return { priority: 'Food anchor', badgeClass: 'neutral', tab: 'meals', button: 'Log breakfast', message: 'Food is the first anchor today. Log breakfast as planned, swapped, or skipped.', reason: 'Honest meal data will tell us whether the plan is working in real life.' };
-  if (!mealLogged(day, 'lunch')) return { priority: 'Lunch data', badgeClass: 'neutral', tab: 'meals', button: 'Log lunch', message: 'Lunch is still open. Logging it now keeps the evening from becoming guesswork.', reason: 'Lunch drives the between-lunch-and-dinner exercise window.' };
-  if (!['full','minimum','recovery'].includes(day.exercise.status)) return { priority: 'Move before dinner', badgeClass: '', tab: 'exercise', button: 'Open movement', message: 'This is the main movement window. Do the full version if it fits, minimum if not.', reason: `Your preferred exercise window is ${appState.data.settings.exerciseWindow}.` };
-  if (!mealLogged(day, 'dinner')) return { priority: 'Close food loop', badgeClass: 'neutral', tab: 'meals', button: 'Log dinner', message: 'Movement is handled. Dinner is the next clean close-the-loop task.', reason: 'Dinner logging keeps the weekly review from overreacting to incomplete calorie data.' };
-  if (!day.windDown.completed) return { priority: 'Wind down', badgeClass: 'blue', tab: 'today', button: 'Do wind-down', message: 'You have the major pieces. End with a short note and let the day be done.', reason: 'Wind-down creates a record of what helped or hurt, not just what you ate.' };
-  return { priority: 'Good enough', badgeClass: '', tab: 'assistant', button: 'See recap', message: 'Today has enough useful data. You do not need to chase perfect.', reason: `This week’s average routine score is ${stats.score}%. Keep building the boring repeatable version.` };
+  const phase = currentTimeBlock();
+  const phaseMeal = currentMealForPhase(phase);
+  const openMeals = MEAL_KEYS.filter(key => !mealLogged(day, key));
+  const movementDone = ['full','minimum','recovery'].includes(day.exercise.status);
+
+  if (phase === 'review') {
+    return { priority: 'Saved-day review', badgeClass: 'neutral', cardId: 'today-overview', button: 'Review this day', focusMessage: 'Day overview opened', message: 'Pathfinder is showing the record for this saved date.', reason: 'Time-aware prompts are disabled on past or future dates so history stays factual.' };
+  }
+  if (day.exercise.pain === 'Yes') {
+    return { priority: 'Protect body', badgeClass: 'danger', cardId: 'today-movement-card', button: 'Open recovery options', focusMessage: 'Recovery options opened', message: 'Pain is logged. Recovery matters more than completing a workout.', reason: 'Consistency should never require pushing through pain.' };
+  }
+
+  if (phase === 'morning') {
+    if (!checkinHasData(day)) return { priority: 'Check in', badgeClass: 'blue', cardId: 'quick-checkin-card', button: 'Do quick check-in', focusMessage: 'Quick check-in opened', message: 'Start with the smallest useful read on sleep, energy, and stress.', reason: 'A quick check-in lets the rest of Today fit the day you are actually having.' };
+    if (!mealLogged(day, 'breakfast')) return { priority: 'Breakfast anchor', badgeClass: 'neutral', cardId: 'today-food-card', button: 'Log breakfast here', focusMessage: 'Breakfast logger opened', message: 'Close breakfast as Ate plan, Swapped, or Skipped.', reason: 'Honest food data matters more than perfectly following a hard-coded meal.' };
+    if (!routineBlockIsComplete(day, 'morning')) return { priority: 'Morning routine', badgeClass: '', cardId: 'today-routine-card', button: 'Do the next routine item', focusMessage: 'Morning routine opened', message: 'The morning anchors are in place. Finish only the next useful routine item.', reason: 'Today should reduce thinking, not create a longer checklist.' };
+    return { priority: 'Morning anchored', badgeClass: '', cardId: 'today-food-card', button: 'See food budget', focusMessage: 'Food budget opened', message: 'The morning basics are handled. Keep the next choice simple.', reason: `This week’s routine score is ${stats.score}%. Repetition matters more than adding more.` };
+  }
+
+  if (phase === 'betweenLunchDinner') {
+    if (!mealLogged(day, 'lunch')) return { priority: 'Lunch data', badgeClass: 'neutral', cardId: 'today-food-card', button: 'Log lunch here', focusMessage: 'Lunch logger opened', message: 'Lunch is the current food anchor. Log what really happened.', reason: 'Closing lunch now prevents evening calorie totals from becoming guesswork.' };
+    if (!checkinHasData(day)) return { priority: 'Reality check', badgeClass: 'blue', cardId: 'quick-checkin-card', button: 'Do quick check-in', focusMessage: 'Quick check-in opened', message: 'Take thirty seconds to record energy, sleep, and stress.', reason: 'Movement recommendations work better when Pathfinder knows how the day feels.' };
+    if (!movementDone) return { priority: 'Movement window', badgeClass: '', cardId: 'today-movement-card', button: 'Choose today’s movement', focusMessage: 'Movement options opened', message: 'This is the preferred movement window. Full, minimum, and recovery all count.', reason: `Your chosen exercise window is ${appState.data.settings.exerciseWindow}.` };
+    if (!routineBlockIsComplete(day, 'betweenLunchDinner')) return { priority: 'Afternoon routine', badgeClass: '', cardId: 'today-routine-card', button: 'Do the next routine item', focusMessage: 'Afternoon routine opened', message: 'Movement is handled. Do only the next useful afternoon item.', reason: 'The goal is to keep the day moving without chasing missed morning tasks.' };
+  }
+
+  if (phase === 'evening') {
+    if (!movementDone) return { priority: 'Minimum movement', badgeClass: 'warn', cardId: 'today-movement-card', button: 'Take a movement win', focusMessage: 'Movement options opened', message: 'The main window passed, but a minimum or recovery win still protects the habit.', reason: 'Five quiet minutes is better than turning a late start into a missed day.' };
+    if (!mealLogged(day, 'dinner')) return { priority: 'Dinner data', badgeClass: 'neutral', cardId: 'today-food-card', button: 'Log dinner here', focusMessage: 'Dinner logger opened', message: 'Log dinner honestly and see what remains in the calorie budget.', reason: 'Dinner is often where the day’s calorie picture becomes clear.' };
+    if (openMeals.length) return { priority: 'Close food gaps', badgeClass: 'neutral', cardId: 'today-food-card', button: 'Close open meals', focusMessage: 'Food logger opened', message: `${openMeals.length} earlier meal${openMeals.length === 1 ? '' : 's'} still need a status. A rough estimate is better than a blank.`, reason: 'Complete food data keeps weekly averages from rewarding missing entries.' };
+    if (!routineBlockIsComplete(day, 'evening')) return { priority: 'Evening reset', badgeClass: '', cardId: 'today-routine-card', button: 'Do the next routine item', focusMessage: 'Evening routine opened', message: 'Do the next evening item, not every task missed earlier.', reason: 'A calm close is more valuable than trying to rescue the whole day.' };
+    if (!day.windDown.completed) return { priority: 'Wind down', badgeClass: 'blue', cardId: 'today-winddown-card', button: 'Close the day', focusMessage: 'Wind-down opened', message: 'One sentence is enough to finish the record and let the day be done.', reason: 'The wind-down turns numbers into a useful explanation for tomorrow.' };
+  }
+
+  if (phaseMeal && !mealLogged(day, phaseMeal)) return { priority: 'Food anchor', badgeClass: 'neutral', cardId: 'today-food-card', button: `Log ${phaseMeal}`, focusMessage: 'Food logger opened', message: `Close ${phaseMeal} with the most honest status available.`, reason: 'Logged reality is more useful than a perfect plan that did not happen.' };
+  return { priority: 'Good enough', badgeClass: '', tab: 'assistant', button: 'See the daily brief', message: 'Today has enough useful data. You do not need to chase perfect.', reason: `This week’s average routine score is ${stats.score}%. Keep building the boring repeatable version.` };
 }
 
 function promptForDate(key) {
@@ -3681,10 +3879,29 @@ function focusQuickCheckin() {
   showToast('Quick check-in opened');
 }
 
+function focusTodayCard(cardId, message = 'Opened') {
+  appState.activeTab = 'today';
+  render();
+  requestAnimationFrame(() => {
+    const card = document.getElementById?.(cardId) || $(`#${cardId}`);
+    if (!card) return;
+    if (card.tagName === 'DETAILS') card.open = true;
+    const parentDetails = card.closest?.('details');
+    if (parentDetails) parentDetails.open = true;
+    card.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    card.classList?.add('attention-flash');
+    const firstControl = card.querySelector?.('button, select, input, textarea');
+    firstControl?.focus?.({ preventScroll: true });
+    setTimeout(() => card.classList?.remove('attention-flash'), 1400);
+  });
+  showToast(message);
+}
+
 function handleAction(action) {
   switch (action.dataset.action) {
     case 'jump': appState.activeTab = APP_TABS.includes(action.dataset.tabTarget) ? action.dataset.tabTarget : 'today'; render(); break;
     case 'focus-checkin': focusQuickCheckin(); break;
+    case 'focus-today-card': focusTodayCard(action.dataset.cardId || 'today-overview', action.dataset.focusMessage || 'Opened'); break;
     case 'minimum-win':
     case 'log-exercise-status': {
       const day = getDay();
@@ -3999,7 +4216,7 @@ async function startPathfinder() {
     await hydrateFromDataFoundation();
   } catch (error) {
     storageLastError = error.message || String(error);
-    console.error('Pathfinder 1.2.1 foundation startup failed; using validated fallback state:', error);
+    console.error('Pathfinder 1.3 foundation startup failed; using validated fallback state:', error);
     appState.data = prepareStateCandidate(appState.data);
   }
   normalizeRuntimeState();
