@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pathfinder-1.4';
+const CACHE_NAME = 'pathfinder-1.4.1';
 const ASSETS = [
   './',
   './index.html',
