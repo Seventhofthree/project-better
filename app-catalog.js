@@ -1,4 +1,4 @@
-/* Pathfinder 1.1 built-in catalogs and default templates.
+/* Pathfinder 1.4 built-in catalogs and default templates.
    Kept separate from the application controller so meal, workout, routine,
    and exercise-guide content can evolve without enlarging app.js.
 */
@@ -79,6 +79,9 @@ const localFoodDatabase = [
   { id: 'db-cooked-white-rice-half', name: 'Cooked white rice', serving: '1/2 cup cooked', calories: 103, protein: 2, fiber: 0.3, category: 'Carb base', source: 'Starter database' },
   { id: 'db-brown-rice', name: 'Cooked brown rice', serving: '1 cup cooked', calories: 216, protein: 5, fiber: 4, category: 'Carb base', source: 'Starter database' },
   { id: 'db-oatmeal', name: 'Oatmeal cooked with water', serving: '1 cup cooked', calories: 154, protein: 6, fiber: 4, category: 'Breakfast', source: 'Starter database' },
+  { id: 'db-bacon-slice', name: 'Cooked bacon', serving: '1 slice', calories: 43, protein: 3, fiber: 0, category: 'Breakfast protein', source: 'Starter database' },
+  { id: 'db-english-muffin', name: 'Plain English muffin', serving: '1 muffin', calories: 134, protein: 5, fiber: 1, category: 'Breakfast bread', source: 'Starter database' },
+  { id: 'db-pork-chop', name: 'Lean pork chop cooked', serving: '4 oz', calories: 210, protein: 30, fiber: 0, category: 'Protein', source: 'Starter database' },
   { id: 'db-banana', name: 'Banana', serving: '1 medium', calories: 105, protein: 1, fiber: 3, category: 'Fruit', source: 'Starter database' },
   { id: 'db-orange', name: 'Orange', serving: '1 medium', calories: 62, protein: 1, fiber: 3, category: 'Fruit', source: 'Starter database' },
   { id: 'db-apple', name: 'Apple', serving: '1 medium', calories: 95, protein: 0, fiber: 4, category: 'Fruit', source: 'Starter database' },

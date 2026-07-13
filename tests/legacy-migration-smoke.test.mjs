@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeIndexedDb, installFakeLocalStorage } from './fake-indexeddb.mjs';
 
-test('a 1.0.1 localStorage state migrates into the durable foundation and opens in 1.3 with frozen history', async () => {
+test('a 1.0.1 localStorage state migrates into the durable foundation and opens in 1.4 with frozen history', async () => {
   installFakeIndexedDb();
   installFakeLocalStorage();
   const sessionValues = new Map();
@@ -78,7 +78,7 @@ test('a 1.0.1 localStorage state migrates into the durable foundation and opens 
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.3 Today-First Daily Flow', coreAppVersion: '1.3', serviceWorkerCache: 'pathfinder-1.3' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.4 Food Depth & Calorie Tracking', coreAppVersion: '1.4', serviceWorkerCache: 'pathfinder-1.4' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -94,10 +94,13 @@ test('a 1.0.1 localStorage state migrates into the durable foundation and opens 
   const primary = candidates.find(candidate => candidate.source === 'IndexedDB primary');
   assert.ok(primary);
   assert.equal(primary.state.settings.name, 'Migration Test');
-  assert.equal(primary.state.version, '1.3');
-  assert.equal(primary.state.schemaVersion, 2);
+  assert.equal(primary.state.version, '1.4');
+  assert.equal(primary.state.schemaVersion, 3);
+  assert.deepEqual(primary.state.favoriteFoods, []);
+  assert.equal(primary.state.mealTemplates.length >= 1, true);
   const migratedDay = primary.state.days['2026-07-09'];
   assert.equal(migratedDay.meals.snapshots.breakfast.calories, 410);
+  assert.deepEqual(migratedDay.meals.entries, []);
   assert.equal(migratedDay.meals.planSnapshot.baseCalories, 1500);
   assert.ok(migratedDay.routine.snapshot.items.some(item => item.id === 'm-brush-teeth'));
   assert.equal(migratedDay.exercise.snapshot.id, 'chair-posture');

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeIndexedDb, installFakeLocalStorage } from './fake-indexeddb.mjs';
 
-test('Pathfinder 1.3 starts, renders the Today-first flow, and opens nested sections with foundation diagnostics', async () => {
+test('Pathfinder 1.4 starts, renders the Today-first flow, and opens nested sections with foundation diagnostics', async () => {
   installFakeIndexedDb();
   installFakeLocalStorage();
   const sessionValues = new Map();
@@ -51,7 +51,7 @@ test('Pathfinder 1.3 starts, renders the Today-first flow, and opens nested sect
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.3 Today-First Daily Flow', coreAppVersion: '1.3', serviceWorkerCache: 'pathfinder-1.3' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.4 Food Depth & Calorie Tracking', coreAppVersion: '1.4', serviceWorkerCache: 'pathfinder-1.4' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -83,7 +83,9 @@ test('Pathfinder 1.3 starts, renders the Today-first flow, and opens nested sect
   });
   assert.match(elements.get('app').innerHTML, /Inside Food/);
   assert.match(elements.get('app').innerHTML, /Today’s Food/);
-  assert.match(elements.get('app').innerHTML, /logged calories/);
+  assert.match(elements.get('app').innerHTML, /Today’s calorie tracker/);
+  assert.match(elements.get('app').innerHTML, /Quick food entry/);
+  assert.match(elements.get('app').innerHTML, /Reusable meals/);
 
   listeners.click({
     target: {
@@ -94,6 +96,7 @@ test('Pathfinder 1.3 starts, renders the Today-first flow, and opens nested sect
     }
   });
 
+  assert.match(elements.get('app').innerHTML, /Pathfinder 1\.4 Food Depth & Calorie Tracking/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.3 Today-First Daily Flow/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.2\.1 Calm Navigation/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.1 Durable Data Foundation/);
@@ -132,8 +135,11 @@ test('Pathfinder 1.3 starts, renders the Today-first flow, and opens nested sect
   });
 
   dispatchAction({ action: 'jump', tabTarget: 'meals' });
-  assert.match(elements.get('app').innerHTML, /Frozen log/);
+  assert.match(elements.get('app').innerHTML, /Optional active meal plan/);
   assert.match(elements.get('app').innerHTML, /440 kcal · 30g protein/);
+  dispatchAction({ action: 'add-db-food', id: 'egg' });
+  assert.match(elements.get('app').innerHTML, /Large egg/);
+  assert.match(elements.get('app').innerHTML, /512 \/ 2,000/);
 
   dispatchAction({ action: 'toggle-routine-item', id: 'm-brush-teeth' });
   dispatchAction({ action: 'jump', tabTarget: 'routines' });
@@ -148,6 +154,9 @@ test('Pathfinder 1.3 starts, renders the Today-first flow, and opens nested sect
   const primary = (await foundation.loadFoundationCandidates()).find(candidate => candidate.source === 'IndexedDB primary');
   const savedDay = Object.values(primary.state.days).find(day => day.meals?.statuses?.breakfast === 'planned');
   assert.equal(savedDay.meals.snapshots.breakfast.calories, 440);
+  assert.equal(savedDay.meals.entries.length, 1);
+  assert.equal(savedDay.meals.entries[0].name, 'Large egg');
+  assert.equal(savedDay.meals.entries[0].calories, 72);
   assert.equal(primary.state.plan.meals.breakfast.calories, 441);
   assert.ok(savedDay.routine.snapshot.items.some(item => item.id === 'm-brush-teeth'));
   assert.equal(savedDay.exercise.snapshot.id, savedDay.exercise.workoutId);
