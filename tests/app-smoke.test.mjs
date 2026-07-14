@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeIndexedDb, installFakeLocalStorage } from './fake-indexeddb.mjs';
 
-test('Pathfinder 1.4 starts, renders the Today-first flow, and opens nested sections with foundation diagnostics', async () => {
+test('Pathfinder 1.4.2 starts, renders the Today-first flow, and opens nested sections with foundation diagnostics', async () => {
   installFakeIndexedDb();
   installFakeLocalStorage();
   const sessionValues = new Map();
@@ -51,7 +51,7 @@ test('Pathfinder 1.4 starts, renders the Today-first flow, and opens nested sect
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.4 Food Depth & Calorie Tracking', coreAppVersion: '1.4', serviceWorkerCache: 'pathfinder-1.4' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.4.2 Unified Food Search & Quick Log', coreAppVersion: '1.4.2', serviceWorkerCache: 'pathfinder-1.4.2' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -85,6 +85,9 @@ test('Pathfinder 1.4 starts, renders the Today-first flow, and opens nested sect
   assert.match(elements.get('app').innerHTML, /Today’s Food/);
   assert.match(elements.get('app').innerHTML, /Today’s calorie tracker/);
   assert.match(elements.get('app').innerHTML, /Quick food entry/);
+  assert.match(elements.get('app').innerHTML, /What did you eat\?/);
+  assert.match(elements.get('app').innerHTML, /Search packaged/);
+  assert.match(elements.get('app').innerHTML, /Scan or enter a barcode/);
   assert.match(elements.get('app').innerHTML, /Reusable meals/);
 
   listeners.click({
@@ -96,7 +99,7 @@ test('Pathfinder 1.4 starts, renders the Today-first flow, and opens nested sect
     }
   });
 
-  assert.match(elements.get('app').innerHTML, /Pathfinder 1\.4 Food Depth & Calorie Tracking/);
+  assert.match(elements.get('app').innerHTML, /Pathfinder 1\.4\.2 Unified Food Search & Quick Log/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.3 Today-First Daily Flow/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.2\.1 Calm Navigation/);
   assert.match(elements.get('app').innerHTML, /Pathfinder 1\.1 Durable Data Foundation/);
@@ -137,9 +140,28 @@ test('Pathfinder 1.4 starts, renders the Today-first flow, and opens nested sect
   dispatchAction({ action: 'jump', tabTarget: 'meals' });
   assert.match(elements.get('app').innerHTML, /Optional active meal plan/);
   assert.match(elements.get('app').innerHTML, /440 kcal · 30g protein/);
+
+  const unifiedQuery = new FakeElement('unified-food-query');
+  const unifiedMeal = new FakeElement('unified-food-meal');
+  const unifiedQuantity = new FakeElement('unified-food-quantity');
+  const unifiedResults = new FakeElement('unified-food-results');
+  unifiedMeal.value = 'breakfast';
+  unifiedQuantity.value = '';
+  elements.set('unified-food-query', unifiedQuery);
+  elements.set('unified-food-meal', unifiedMeal);
+  elements.set('unified-food-quantity', unifiedQuantity);
+  elements.set('unified-food-results', unifiedResults);
+  listeners.input({ target: { id: 'unified-food-query', value: '3 bacon', dataset: {} } });
+  assert.match(unifiedResults.innerHTML, /Cooked bacon/);
+  const baconMatch = unifiedResults.innerHTML.match(/data-action="log-unified-food" data-search-id="([^"]+)" data-quantity="3"/);
+  assert.ok(baconMatch);
+  dispatchAction({ action: 'log-unified-food', searchId: baconMatch[1], quantity: '3' });
+  assert.match(elements.get('app').innerHTML, /Cooked bacon/);
+  assert.match(elements.get('app').innerHTML, /569 \/ 2,000/);
+
   dispatchAction({ action: 'add-db-food', id: 'egg' });
   assert.match(elements.get('app').innerHTML, /Large egg/);
-  assert.match(elements.get('app').innerHTML, /512 \/ 2,000/);
+  assert.match(elements.get('app').innerHTML, /641 \/ 2,000/);
 
   dispatchAction({ action: 'toggle-routine-item', id: 'm-brush-teeth' });
   dispatchAction({ action: 'jump', tabTarget: 'routines' });
@@ -154,9 +176,11 @@ test('Pathfinder 1.4 starts, renders the Today-first flow, and opens nested sect
   const primary = (await foundation.loadFoundationCandidates()).find(candidate => candidate.source === 'IndexedDB primary');
   const savedDay = Object.values(primary.state.days).find(day => day.meals?.statuses?.breakfast === 'planned');
   assert.equal(savedDay.meals.snapshots.breakfast.calories, 440);
-  assert.equal(savedDay.meals.entries.length, 1);
-  assert.equal(savedDay.meals.entries[0].name, 'Large egg');
-  assert.equal(savedDay.meals.entries[0].calories, 72);
+  assert.equal(savedDay.meals.entries.length, 2);
+  assert.equal(savedDay.meals.entries[0].name, 'Cooked bacon');
+  assert.equal(savedDay.meals.entries[0].calories, 129);
+  assert.equal(savedDay.meals.entries[1].name, 'Large egg');
+  assert.equal(savedDay.meals.entries[1].calories, 72);
   assert.equal(primary.state.plan.meals.breakfast.calories, 441);
   assert.ok(savedDay.routine.snapshot.items.some(item => item.id === 'm-brush-teeth'));
   assert.equal(savedDay.exercise.snapshot.id, savedDay.exercise.workoutId);

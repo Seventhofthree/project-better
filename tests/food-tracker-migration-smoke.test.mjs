@@ -71,7 +71,7 @@ test('a 1.3 state migrates to schema 3 without losing legacy food logs or saved 
     addEventListener(type, callback) { listeners[type] = callback; }
   };
   globalThis.window = globalThis;
-  window.__PATHFINDER_RELEASE__ = { release: '1.4 Food Depth & Calorie Tracking', coreAppVersion: '1.4', serviceWorkerCache: 'pathfinder-1.4' };
+  window.__PATHFINDER_RELEASE__ = { release: '1.4.2 Unified Food Search & Quick Log', coreAppVersion: '1.4.2', serviceWorkerCache: 'pathfinder-1.4.2' };
   window.addEventListener = () => {};
   window.matchMedia = () => ({ matches: false });
   Object.defineProperty(globalThis, 'navigator', { value: { onLine: true, storage: { persist: async () => true } }, configurable: true });
@@ -85,7 +85,7 @@ test('a 1.3 state migrates to schema 3 without losing legacy food logs or saved 
 
   const primary = (await foundation.loadFoundationCandidates()).find(candidate => candidate.source === 'IndexedDB primary');
   assert.ok(primary);
-  assert.equal(primary.state.version, '1.4');
+  assert.equal(primary.state.version, '1.4.2');
   assert.equal(primary.state.schemaVersion, 3);
   assert.equal(primary.state.settings.proteinGoal, 100);
   assert.equal(primary.state.settings.fiberGoal, 30);

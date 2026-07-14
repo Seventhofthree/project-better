@@ -15,11 +15,12 @@ test('index keeps four daily destinations together and Settings separate', () =>
   assert.doesNotMatch(indexHtml, /<button data-tab="(meals|exercise|guide|routines|assistant|review|history)"/);
 });
 
-test('index, module entry, and offline cache consistently identify Pathfinder 1.4', () => {
-  assert.match(indexHtml, /release: '1\.4 Food Depth & Calorie Tracking'/);
-  assert.match(indexHtml, /serviceWorkerCache: 'pathfinder-1\.4'/);
-  assert.match(indexHtml, /type="module" src="app\.js\?v=1\.4"/);
-  assert.match(serviceWorker, /const CACHE_NAME = 'pathfinder-1\.4'/);
+test('index, module entry, and offline cache consistently identify Pathfinder 1.4.2', () => {
+  assert.match(indexHtml, /release: '1\.4\.2 Unified Food Search & Quick Log'/);
+  assert.match(indexHtml, /serviceWorkerCache: 'pathfinder-1\.4\.2'/);
+  assert.match(indexHtml, /type="module" src="app\.js\?v=1\.4\.2"/);
+  assert.match(serviceWorker, /const CACHE_NAME = 'pathfinder-1\.4\.2'/);
   assert.match(serviceWorker, /'\.\/today-flow\.js'/);
   assert.match(serviceWorker, /'\.\/food-tracker\.js'/);
+  assert.match(serviceWorker, /'\.\/food-search\.js'/);
 });

@@ -21,31 +21,69 @@ Progress
 - **1.2.1 — Navigation Hierarchy Polish**
 - **1.3 — Today-First Daily Flow**
 
-## 1.4 — Food Depth & Calorie Tracking
+## 1.4 — Best-in-class calorie tracker
 
-- Actual food entries rather than hard-coded meals as the main workflow
-- Partial and multiple serving quantities
-- Daily calorie target, logged calories, and calories remaining
-- Protein and fiber targets
-- Breakfast, lunch, dinner, snack, drink, and extra-food grouping
-- Editable quantity and meal assignment
-- Recent foods and favorites
-- Reusable meals created from logged entries
-- Repeat yesterday or an individual meal from yesterday
-- Manual nutrition-label entry
-- Starter database and optional packaged-food search
-- Exact-label, database-estimate, personal-estimate, and planned-value labels
+### 1.4.0 — Food Depth & Calorie Tracking
+
+- Individual foods and serving quantities
+- Daily calorie, protein, and fiber tracking
+- Favorites, recent foods, reusable meals, and repeats
 - Optional meal-plan compatibility
-- Exercise calories shown separately and not automatically eaten back
-- Food-entry details added to CSV and JSON exports
+- Schema 3 migration
+
+### 1.4.1 — Visual Restoration
+
+- Restored the complete Pathfinder visual system after the 1.4 stylesheet packaging error
+- Added regression protection for the full theme
+
+### 1.4.2 — Unified Food Search & Quick Log
+
+- Search-first logging across favorites, recents, saved foods, starters, and packaged foods
+- Natural amount shortcuts and serving conversions
+- Barcode lookup and optional camera scanning
+- Nutrition completeness checks
+- Duplicate warning and removal undo
+- Manual label entry retained as fallback
 
 **Status: current release under user verification.**
 
-## 1.5 — Movement Depth
+### 1.4.3 — Recipes, portions, and reusable meals
 
-Combine today’s workout, exercise guidance, plan progression, quiet alternatives, recovery logic, custom workout editing, and explainable recommendations.
+- Ingredient-based recipe builder
+- Batch yield and portions
+- Historical recipe snapshots
+- Duplicate and revise recipes
+- Faster full-meal logging
 
 **Status: next.**
+
+### 1.4.4 — Full nutrition dashboard
+
+- Carbohydrates, fat, saturated fat, sugar, and sodium
+- Optional nutrient visibility and targets
+- Calm Today summary with deeper Food detail
+
+### 1.4.5 — Weight-loss intelligence
+
+- Weekly calorie budget
+- Seven-, fourteen-, and twenty-eight-day averages
+- Logging-completeness and source-confidence views
+- Intake and weight-trend comparisons
+- Plateau and recovery guidance
+
+### 1.4.6 — Speed, polish, offline, and regression
+
+- Search from Today
+- Multi-food logging
+- Bulk editing
+- Faster repeat actions
+- Phone interaction polish
+- Offline packaged-food cache controls
+- Full calorie-tracker regression pass
+
+## 1.5 — Movement Depth
+
+Movement work remains paused until the expanded 1.4 calorie-tracker track is complete.
 
 ## 1.6 — Progress and Review Depth
 
@@ -64,8 +102,6 @@ Improve labels, focus behavior, keyboard support, reduced motion, screen-reader 
 Freeze visible features and run full regression, migration, long-history, recovery, accessibility, offline, phone, tablet, and desktop testing.
 
 ## 2.0 — Integrated Companion
-
-Pathfinder 2.0 should answer four questions:
 
 ```text
 Today: What matters now?
